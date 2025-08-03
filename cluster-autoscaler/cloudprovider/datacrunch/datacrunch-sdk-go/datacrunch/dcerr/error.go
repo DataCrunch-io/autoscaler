@@ -37,3 +37,10 @@ type RequestFailure interface {
 func NewRequestFailure(err Error, statusCode int, reqID string) RequestFailure {
 	return newRequestError(err, statusCode, reqID)
 }
+
+func NewUnmarshalError(err error, message string, bytes []byte) Error {
+	return &unmarshalError{
+		dcError: New("UnmarshalError", message, err),
+		bytes:   bytes,
+	}
+}

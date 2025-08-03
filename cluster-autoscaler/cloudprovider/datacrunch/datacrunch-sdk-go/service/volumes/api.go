@@ -4,11 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/dcerr"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
 )
 
@@ -90,51 +87,16 @@ func (c *Volumes) ListVolumes(ctx context.Context) ([]*VolumeResponse, error) {
 		HTTPPath:   "/volumes",
 	}
 
-	req := c.NewRequest(op, nil, nil)
+	var volumes []*VolumeResponse
+	req := c.NewRequest(op, nil, &volumes)
 	req.SetContext(ctx)
-
-	// Run the Build handlers
-	req.Handlers.Build.Run(req)
-	if req.Error != nil {
-		return nil, req.Error
-	}
 
 	// Log the request URL
 	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
 
-	// Send the request
-	httpClient := &http.Client{}
-	resp, err := httpClient.Do(req.HTTPRequest)
-	if err != nil {
-		return nil, dcerr.New("RequestError", "failed to send request", err)
-	}
-	defer resp.Body.Close()
-
-	// Set the response
-	req.HTTPResponse = resp
-
-	// Run the Complete handlers
-	req.Handlers.Complete.Run(req)
-	if req.Error != nil {
-		return nil, req.Error
-	}
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		// Read and log the response body for error cases
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("Error response body: %s", string(body))
-		return nil, dcerr.NewRequestFailure(
-			dcerr.New("RequestError", fmt.Sprintf("unexpected status code: %d", resp.StatusCode), nil),
-			resp.StatusCode,
-			"",
-		)
-	}
-
-	// Parse response
-	var volumes []*VolumeResponse
-	if err := json.NewDecoder(resp.Body).Decode(&volumes); err != nil {
-		return nil, dcerr.New("SerializationError", "failed to decode response", err)
+	// Use the client's Send method which handles all the request/response lifecycle
+	if err := req.Send(); err != nil {
+		return nil, err
 	}
 
 	return volumes, nil
@@ -148,51 +110,16 @@ func (c *Volumes) GetVolume(ctx context.Context, id string) (*VolumeResponse, er
 		HTTPPath:   fmt.Sprintf("/volumes/%s", id),
 	}
 
-	req := c.NewRequest(op, nil, nil)
+	var volume VolumeResponse
+	req := c.NewRequest(op, nil, &volume)
 	req.SetContext(ctx)
-
-	// Run the Build handlers
-	req.Handlers.Build.Run(req)
-	if req.Error != nil {
-		return nil, req.Error
-	}
 
 	// Log the request URL
 	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
 
-	// Send the request
-	httpClient := &http.Client{}
-	resp, err := httpClient.Do(req.HTTPRequest)
-	if err != nil {
-		return nil, dcerr.New("RequestError", "failed to send request", err)
-	}
-	defer resp.Body.Close()
-
-	// Set the response
-	req.HTTPResponse = resp
-
-	// Run the Complete handlers
-	req.Handlers.Complete.Run(req)
-	if req.Error != nil {
-		return nil, req.Error
-	}
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		// Read and log the response body for error cases
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("Error response body: %s", string(body))
-		return nil, dcerr.NewRequestFailure(
-			dcerr.New("RequestError", fmt.Sprintf("unexpected status code: %d", resp.StatusCode), nil),
-			resp.StatusCode,
-			"",
-		)
-	}
-
-	// Parse response
-	var volume VolumeResponse
-	if err := json.NewDecoder(resp.Body).Decode(&volume); err != nil {
-		return nil, dcerr.New("SerializationError", "failed to decode response", err)
+	// Use the client's Send method which handles all the request/response lifecycle
+	if err := req.Send(); err != nil {
+		return nil, err
 	}
 
 	return &volume, nil
@@ -206,53 +133,22 @@ func (c *Volumes) CreateVolume(ctx context.Context, input *CreateVolumeInput) (s
 		HTTPPath:   "/volumes",
 	}
 
-	req := c.NewRequest(op, nil, input)
+	var volumeID string
+	req := c.NewRequest(op, input, &volumeID)
 	req.SetContext(ctx)
 
-	// Run the Build handlers
-	req.Handlers.Build.Run(req)
-	if req.Error != nil {
-		return "", req.Error
+	// Log the request URL and payload
+	if body, err := json.Marshal(input); err == nil {
+		log.Printf("Request payload: %s", string(body))
 	}
-
-	// Log the request URL
 	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
 
-	// Send the request
-	httpClient := &http.Client{}
-	resp, err := httpClient.Do(req.HTTPRequest)
-	if err != nil {
-		return "", dcerr.New("RequestError", "failed to send request", err)
-	}
-	defer resp.Body.Close()
-
-	// Set the response
-	req.HTTPResponse = resp
-
-	// Run the Complete handlers
-	req.Handlers.Complete.Run(req)
-	if req.Error != nil {
-		return "", req.Error
+	// Use the client's Send method which handles all the request/response lifecycle
+	if err := req.Send(); err != nil {
+		return "", err
 	}
 
-	// Check response status
-	if resp.StatusCode != http.StatusAccepted {
-		// Read and log the response body for error cases
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("Error response body: %s", string(body))
-		return "", dcerr.NewRequestFailure(
-			dcerr.New("RequestError", fmt.Sprintf("unexpected status code: %d", resp.StatusCode), nil),
-			resp.StatusCode,
-			"",
-		)
-	}
-
-	// Parse response
-	var volumeID string
-	if err := json.NewDecoder(resp.Body).Decode(&volumeID); err != nil {
-		return "", dcerr.New("SerializationError", "failed to decode response", err)
-	}
-
+	log.Printf("Successfully created volume: %s", volumeID)
 	return volumeID, nil
 }
 
@@ -264,47 +160,21 @@ func (c *Volumes) PerformVolumeAction(ctx context.Context, input *VolumeActionIn
 		HTTPPath:   "/volumes",
 	}
 
-	req := c.NewRequest(op, nil, input)
+	req := c.NewRequest(op, input, nil)
 	req.SetContext(ctx)
 
-	// Run the Build handlers
-	req.Handlers.Build.Run(req)
-	if req.Error != nil {
-		return req.Error
+	// Log the request URL and payload
+	if body, err := json.Marshal(input); err == nil {
+		log.Printf("Request payload: %s", string(body))
 	}
-
-	// Log the request URL
 	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
 
-	// Send the request
-	httpClient := &http.Client{}
-	resp, err := httpClient.Do(req.HTTPRequest)
-	if err != nil {
-		return dcerr.New("RequestError", "failed to send request", err)
-	}
-	defer resp.Body.Close()
-
-	// Set the response
-	req.HTTPResponse = resp
-
-	// Run the Complete handlers
-	req.Handlers.Complete.Run(req)
-	if req.Error != nil {
-		return req.Error
+	// Use the client's Send method which handles all the request/response lifecycle
+	if err := req.Send(); err != nil {
+		return err
 	}
 
-	// Check response status
-	if resp.StatusCode != http.StatusAccepted {
-		// Read and log the response body for error cases
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("Error response body: %s", string(body))
-		return dcerr.NewRequestFailure(
-			dcerr.New("RequestError", fmt.Sprintf("unexpected status code: %d", resp.StatusCode), nil),
-			resp.StatusCode,
-			"",
-		)
-	}
-
+	log.Printf("Successfully performed action %s on volume %s", input.Action, input.ID)
 	return nil
 }
 
@@ -316,51 +186,16 @@ func (c *Volumes) ListTrashVolumes(ctx context.Context) ([]*VolumeResponse, erro
 		HTTPPath:   "/volumes/trash",
 	}
 
-	req := c.NewRequest(op, nil, nil)
+	var volumes []*VolumeResponse
+	req := c.NewRequest(op, nil, &volumes)
 	req.SetContext(ctx)
-
-	// Run the Build handlers
-	req.Handlers.Build.Run(req)
-	if req.Error != nil {
-		return nil, req.Error
-	}
 
 	// Log the request URL
 	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
 
-	// Send the request
-	httpClient := &http.Client{}
-	resp, err := httpClient.Do(req.HTTPRequest)
-	if err != nil {
-		return nil, dcerr.New("RequestError", "failed to send request", err)
-	}
-	defer resp.Body.Close()
-
-	// Set the response
-	req.HTTPResponse = resp
-
-	// Run the Complete handlers
-	req.Handlers.Complete.Run(req)
-	if req.Error != nil {
-		return nil, req.Error
-	}
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		// Read and log the response body for error cases
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("Error response body: %s", string(body))
-		return nil, dcerr.NewRequestFailure(
-			dcerr.New("RequestError", fmt.Sprintf("unexpected status code: %d", resp.StatusCode), nil),
-			resp.StatusCode,
-			"",
-		)
-	}
-
-	// Parse response
-	var volumes []*VolumeResponse
-	if err := json.NewDecoder(resp.Body).Decode(&volumes); err != nil {
-		return nil, dcerr.New("SerializationError", "failed to decode response", err)
+	// Use the client's Send method which handles all the request/response lifecycle
+	if err := req.Send(); err != nil {
+		return nil, err
 	}
 
 	return volumes, nil
@@ -380,46 +215,20 @@ func (c *Volumes) DeleteVolume(ctx context.Context, id string, isPermanent bool)
 		IsPermanent: isPermanent,
 	}
 
-	req := c.NewRequest(op, nil, input)
+	req := c.NewRequest(op, input, nil)
 	req.SetContext(ctx)
 
-	// Run the Build handlers
-	req.Handlers.Build.Run(req)
-	if req.Error != nil {
-		return req.Error
+	// Log the request URL and payload
+	if body, err := json.Marshal(input); err == nil {
+		log.Printf("Request payload: %s", string(body))
 	}
-
-	// Log the request URL
 	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
 
-	// Send the request
-	httpClient := &http.Client{}
-	resp, err := httpClient.Do(req.HTTPRequest)
-	if err != nil {
-		return dcerr.New("RequestError", "failed to send request", err)
-	}
-	defer resp.Body.Close()
-
-	// Set the response
-	req.HTTPResponse = resp
-
-	// Run the Complete handlers
-	req.Handlers.Complete.Run(req)
-	if req.Error != nil {
-		return req.Error
+	// Use the client's Send method which handles all the request/response lifecycle
+	if err := req.Send(); err != nil {
+		return err
 	}
 
-	// Check response status
-	if resp.StatusCode != http.StatusAccepted {
-		// Read and log the response body for error cases
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("Error response body: %s", string(body))
-		return dcerr.NewRequestFailure(
-			dcerr.New("RequestError", fmt.Sprintf("unexpected status code: %d", resp.StatusCode), nil),
-			resp.StatusCode,
-			"",
-		)
-	}
-
+	log.Printf("Successfully deleted volume %s (permanent: %v)", id, isPermanent)
 	return nil
 }

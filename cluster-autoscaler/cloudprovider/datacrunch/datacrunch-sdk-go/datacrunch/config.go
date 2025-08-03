@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/common"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client/metadata"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
@@ -93,7 +92,7 @@ type httpResponse struct {
 }
 
 // Post implements the APIClientInterface for service clients
-func (w *httpClientWrapper) Post(ctx context.Context, path string, body interface{}) (common.ResponseInterface, error) {
+func (w *httpClientWrapper) Post(ctx context.Context, path string, body interface{}) (client.ResponseInterface, error) {
 	resp, err := w.client.Post(ctx, path, body)
 	if err != nil {
 		return nil, err
@@ -106,7 +105,7 @@ func (w *httpClientWrapper) Post(ctx context.Context, path string, body interfac
 }
 
 // Get implements the APIClientInterface for service clients
-func (w *httpClientWrapper) Get(ctx context.Context, path string) (common.ResponseInterface, error) {
+func (w *httpClientWrapper) Get(ctx context.Context, path string) (client.ResponseInterface, error) {
 	resp, err := w.client.Get(ctx, path)
 	if err != nil {
 		return nil, err
@@ -119,7 +118,7 @@ func (w *httpClientWrapper) Get(ctx context.Context, path string) (common.Respon
 }
 
 // Delete implements the APIClientInterface for service clients
-func (w *httpClientWrapper) Delete(ctx context.Context, path string) (common.ResponseInterface, error) {
+func (w *httpClientWrapper) Delete(ctx context.Context, path string) (client.ResponseInterface, error) {
 	resp, err := w.client.Delete(ctx, path)
 	if err != nil {
 		return nil, err
@@ -132,7 +131,7 @@ func (w *httpClientWrapper) Delete(ctx context.Context, path string) (common.Res
 }
 
 // Put implements the APIClientInterface for service clients
-func (w *httpClientWrapper) Put(ctx context.Context, path string, body interface{}) (common.ResponseInterface, error) {
+func (w *httpClientWrapper) Put(ctx context.Context, path string, body interface{}) (client.ResponseInterface, error) {
 	resp, err := w.client.Put(ctx, path, body)
 	if err != nil {
 		return nil, err

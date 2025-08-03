@@ -10,6 +10,18 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client/metadata"
 )
 
+// ResponseInterface defines the common interface for HTTP responses
+type ResponseInterface interface {
+	// DecodeJSON decodes the response body into the target interface
+	DecodeJSON(target interface{}) error
+	
+	// GetStatusCode returns the HTTP status code
+	GetStatusCode() int
+	
+	// GetBody returns the response body as bytes
+	GetBody() []byte
+}
+
 // A Config provides configuration to a service client instance.
 type Config struct {
 	BaseURL      string
@@ -90,6 +102,12 @@ func (c *Client) AddDebugHandlers() {
 		Name: "DebugHandler",
 		Fn:   auth.DebugHandler,
 	})
+}
+
+// AddProtocolHandlers adds the REST JSON protocol handlers to the client
+func (c *Client) AddProtocolHandlers() {
+	// Import the protocol handlers - will be added by services as needed
+	// This method provides a hook for adding protocol-specific handlers
 }
 
 // Post makes a POST request to the specified path with the given body

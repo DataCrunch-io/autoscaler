@@ -2,13 +2,9 @@ package instanceavailability
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
 
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/dcerr"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
 )
 
@@ -31,51 +27,16 @@ func (c *InstanceAvailability) ListInstanceAvailability(ctx context.Context) ([]
 		HTTPPath:   "/instance-availability",
 	}
 
-	req := c.NewRequest(op, nil, nil)
+	var availabilities []*InstanceAvailabilityResponse
+	req := c.NewRequest(op, nil, &availabilities)
 	req.SetContext(ctx)
-
-	// Run the Build handlers
-	req.Handlers.Build.Run(req)
-	if req.Error != nil {
-		return nil, req.Error
-	}
 
 	// Log the request URL
 	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
 
-	// Send the request
-	httpClient := &http.Client{}
-	resp, err := httpClient.Do(req.HTTPRequest)
-	if err != nil {
-		return nil, dcerr.New("RequestError", "failed to send request", err)
-	}
-	defer resp.Body.Close()
-
-	// Set the response
-	req.HTTPResponse = resp
-
-	// Run the Complete handlers
-	req.Handlers.Complete.Run(req)
-	if req.Error != nil {
-		return nil, req.Error
-	}
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		// Read and log the response body for error cases
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("Error response body: %s", string(body))
-		return nil, dcerr.NewRequestFailure(
-			dcerr.New("RequestError", fmt.Sprintf("unexpected status code: %d", resp.StatusCode), nil),
-			resp.StatusCode,
-			"",
-		)
-	}
-
-	// Parse response
-	var availabilities []*InstanceAvailabilityResponse
-	if err := json.NewDecoder(resp.Body).Decode(&availabilities); err != nil {
-		return nil, dcerr.New("SerializationError", "failed to decode response", err)
+	// Use the client's Send method which handles all the request/response lifecycle
+	if err := req.Send(); err != nil {
+		return nil, err
 	}
 
 	// Log the response
@@ -91,57 +52,16 @@ func (c *InstanceAvailability) CheckInstanceAvailability(ctx context.Context, in
 		HTTPPath:   fmt.Sprintf("/instance-availability/%s", instanceType),
 	}
 
-	req := c.NewRequest(op, nil, nil)
+	var available bool
+	req := c.NewRequest(op, nil, &available)
 	req.SetContext(ctx)
-
-	// Run the Build handlers
-	req.Handlers.Build.Run(req)
-	if req.Error != nil {
-		return false, req.Error
-	}
 
 	// Log the request URL
 	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
 
-	// Send the request
-	httpClient := &http.Client{}
-	resp, err := httpClient.Do(req.HTTPRequest)
-	if err != nil {
-		return false, dcerr.New("RequestError", "failed to send request", err)
-	}
-	defer resp.Body.Close()
-
-	// Set the response
-	req.HTTPResponse = resp
-
-	// Run the Complete handlers
-	req.Handlers.Complete.Run(req)
-	if req.Error != nil {
-		return false, req.Error
-	}
-
-	// Check response status
-	if resp.StatusCode != http.StatusOK {
-		// Read and log the response body for error cases
-		body, _ := io.ReadAll(resp.Body)
-		log.Printf("Error response body: %s", string(body))
-		return false, dcerr.NewRequestFailure(
-			dcerr.New("RequestError", fmt.Sprintf("unexpected status code: %d", resp.StatusCode), nil),
-			resp.StatusCode,
-			"",
-		)
-	}
-
-	// Read the response body which should be a boolean
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return false, dcerr.New("SerializationError", "failed to read response body", err)
-	}
-
-	// Parse the boolean response
-	var available bool
-	if err := json.Unmarshal(body, &available); err != nil {
-		return false, dcerr.New("SerializationError", "failed to decode response", err)
+	// Use the client's Send method which handles all the request/response lifecycle
+	if err := req.Send(); err != nil {
+		return false, err
 	}
 
 	log.Printf("Instance type %s availability: %v", instanceType, available)

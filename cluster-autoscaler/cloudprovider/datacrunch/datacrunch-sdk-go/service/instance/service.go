@@ -4,6 +4,7 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client/metadata"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/internal/protocol/restjson"
 )
 
 const (
@@ -28,12 +29,19 @@ var initRequest func(*request.Request)
 
 // New creates a new instance of the instance client with a session.
 func New(cfg *client.Config) *Instance {
+	handlers := request.Handlers{}
+	
+	// Add protocol handlers for REST JSON
+	handlers.Build.PushBackNamed(restjson.BuildHandler)
+	handlers.Unmarshal.PushBackNamed(restjson.UnmarshalHandler)
+	handlers.Complete.PushBackNamed(restjson.UnmarshalMetaHandler)
+	
 	svc := &Instance{
 		Client: client.New(cfg, metadata.ClientInfo{
 			ServiceName: EndpointsID,
 			APIVersion:  "v1",
 			Endpoint:    "https://api.datacrunch.io/v1",
-		}, request.Handlers{}),
+		}, handlers),
 	}
 
 	// Run custom client initialization if present

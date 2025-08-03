@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/internal/sdkrand"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/internal/util"
 )
 
 // DefaultRetryer implements basic retry logic using exponential backoff for
@@ -119,7 +119,7 @@ func (d DefaultRetryer) RetryRules(r *request.Request) time.Duration {
 
 // getJitterDelay returns a jittered delay for retry
 func getJitterDelay(duration time.Duration) time.Duration {
-	return time.Duration(sdkrand.SeededRand.Int63n(int64(duration)) + int64(duration))
+	return time.Duration(util.SeededRand.Int63n(int64(duration)) + int64(duration))
 }
 
 // ShouldRetry returns true if the request should be retried.
