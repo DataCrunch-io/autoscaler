@@ -201,11 +201,11 @@ func buildURI(u *url.URL, v reflect.Value, name string, tag reflect.StructTag) e
 		return dcerr.New(request.ErrCodeSerialization, "failed to encode REST request", err)
 	}
 
-	u.Path = strings.Replace(u.Path, "{"+name+"}", value, -1)
-	u.Path = strings.Replace(u.Path, "{"+name+"+}", value, -1)
+	u.Path = strings.ReplaceAll(u.Path, "{"+name+"}", value)
+	u.Path = strings.ReplaceAll(u.Path, "{"+name+"+}", value)
 
-	u.RawPath = strings.Replace(u.RawPath, "{"+name+"}", EscapePath(value, true), -1)
-	u.RawPath = strings.Replace(u.RawPath, "{"+name+"+}", EscapePath(value, false), -1)
+	u.RawPath = strings.ReplaceAll(u.RawPath, "{"+name+"}", EscapePath(value, true))
+	u.RawPath = strings.ReplaceAll(u.RawPath, "{"+name+"+}", EscapePath(value, false))
 
 	return nil
 }
@@ -296,12 +296,12 @@ func convertType(v reflect.Value, tag reflect.StructTag) (str string, err error)
 				buff.WriteRune(',')
 			}
 			item := *sv
-			if strings.Index(item, `,`) != -1 || strings.Index(item, `"`) != -1 {
+			if strings.Contains(item, `,`) || strings.Contains(item, `"`) {
 				item = strconv.Quote(item)
 			}
 			buff.WriteString(item)
 		}
-		str = string(buff.Bytes())
+		str = buff.String()
 	case []byte:
 		str = base64.StdEncoding.EncodeToString(value)
 	case bool:

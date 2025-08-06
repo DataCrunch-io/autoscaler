@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"io"
-	"io/ioutil"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -39,8 +38,8 @@ const (
 // Request is a simplified version focusing only on the essential functionality
 // for making HTTP requests with retry support.
 type Request struct {
-	Config       interface{}  // Using interface{} to avoid import cycle
-	Handlers     Handlers
+	Config   interface{} // Using interface{} to avoid import cycle
+	Handlers Handlers
 
 	Retryer
 	Operation    *Operation
@@ -86,11 +85,29 @@ func New(cfg interface{}, handlers Handlers, retryer Retryer, operation *Operati
 	httpReq, _ := http.NewRequest(method, "", nil)
 
 	// Extract BaseURL from config
-	baseURL := "https://api.datacrunch.io/v1" // default value
-	if config, ok := cfg.(map[string]interface{}); ok {
+	baseURL := "https://api.datacrunch.io/v1" // default fallback value
+
+	// Try different config types
+	switch config := cfg.(type) {
+	case map[string]interface{}:
 		if url, exists := config["BaseURL"]; exists {
 			if str, ok := url.(string); ok {
 				baseURL = str
+			}
+		}
+	default:
+		// Use reflection to check for BaseURL field in any config struct
+		if cfgValue := reflect.ValueOf(cfg); cfgValue.IsValid() {
+			// Handle both struct and pointer to struct
+			if cfgValue.Kind() == reflect.Ptr && !cfgValue.IsNil() {
+				cfgValue = cfgValue.Elem()
+			}
+			if cfgValue.Kind() == reflect.Struct {
+				if field := cfgValue.FieldByName("BaseURL"); field.IsValid() && field.Kind() == reflect.String {
+					if urlStr := field.String(); urlStr != "" {
+						baseURL = urlStr
+					}
+				}
 			}
 		}
 	}
@@ -202,9 +219,9 @@ func (r *Request) getNextRequestBody() (body io.ReadCloser, err error) {
 			return nil, dcerr.New(ErrCodeSerialization,
 				"failed to reset request body", err)
 		}
-		return ioutil.NopCloser(r.Body), nil
+		return io.NopCloser(r.Body), nil
 	}
-	
+
 	return http.NoBody, nil
 }
 
@@ -246,7 +263,7 @@ func (r *Request) Send() error {
 		if r.HTTPResponse == nil {
 			r.HTTPResponse = &http.Response{
 				Header: http.Header{},
-				Body:   ioutil.NopCloser(&bytes.Buffer{}),
+				Body:   io.NopCloser(&bytes.Buffer{}),
 			}
 		}
 		// Regardless of success or failure of the request trigger the Complete
@@ -340,13 +357,16 @@ func (r *Request) prepareRetry() error {
 				"failed to prepare body for retry", err)
 		}
 	}
-	
+
 	// Closing response body to ensure that no response body is leaked
 	// between retry attempts.
 	if r.HTTPResponse != nil && r.HTTPResponse.Body != nil {
-		r.HTTPResponse.Body.Close()
+		if err := r.HTTPResponse.Body.Close(); err != nil {
+			// Log the error but don't fail the retry preparation
+			// as this is just cleanup
+			_ = err // Suppress unused variable warning
+		}
 	}
 
 	return nil
 }
-

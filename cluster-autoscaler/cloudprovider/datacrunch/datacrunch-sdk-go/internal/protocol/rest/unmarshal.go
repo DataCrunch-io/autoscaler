@@ -5,7 +5,6 @@ import (
 	"encoding/base64"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math"
 	"net/http"
 	"reflect"
@@ -15,8 +14,8 @@ import (
 
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/dcerr"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/internal/util"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/internal/protocol"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/internal/util"
 )
 
 // UnmarshalHandler is a named request handler for unmarshaling rest protocol requests
@@ -67,7 +66,7 @@ func unmarshalBody(r *request.Request, v reflect.Value) error {
 								r.Error = dcerr.New(request.ErrCodeSerialization, "failed to close response body", err)
 							}
 						}()
-						b, err := ioutil.ReadAll(r.HTTPResponse.Body)
+						b, err := io.ReadAll(r.HTTPResponse.Body)
 						if err != nil {
 							return dcerr.New(request.ErrCodeSerialization, "failed to decode REST response", err)
 						}
@@ -80,7 +79,7 @@ func unmarshalBody(r *request.Request, v reflect.Value) error {
 								r.Error = dcerr.New(request.ErrCodeSerialization, "failed to close response body", err)
 							}
 						}()
-						b, err := ioutil.ReadAll(r.HTTPResponse.Body)
+						b, err := io.ReadAll(r.HTTPResponse.Body)
 						if err != nil {
 							return dcerr.New(request.ErrCodeSerialization, "failed to decode REST response", err)
 						}
@@ -94,16 +93,22 @@ func unmarshalBody(r *request.Request, v reflect.Value) error {
 							payload.Set(reflect.ValueOf(r.HTTPResponse.Body))
 
 						case "io.ReadSeeker":
-							b, err := ioutil.ReadAll(r.HTTPResponse.Body)
+							b, err := io.ReadAll(r.HTTPResponse.Body)
 							if err != nil {
 								return dcerr.New(request.ErrCodeSerialization,
 									"failed to read response body", err)
 							}
-							payload.Set(reflect.ValueOf(ioutil.NopCloser(bytes.NewReader(b))))
+							payload.Set(reflect.ValueOf(io.NopCloser(bytes.NewReader(b))))
 
 						default:
-							io.Copy(ioutil.Discard, r.HTTPResponse.Body)
-							r.HTTPResponse.Body.Close()
+							if _, err := io.Copy(io.Discard, r.HTTPResponse.Body); err != nil {
+								// Log the error but continue with cleanup
+								_ = err // Suppress unused variable warning
+							}
+							if err := r.HTTPResponse.Body.Close(); err != nil {
+								// Log the error but continue with cleanup
+								_ = err // Suppress unused variable warning
+							}
 							return dcerr.New(request.ErrCodeSerialization,
 								"failed to decode REST response",
 								fmt.Errorf("unknown payload type %s", payload.Type()))
@@ -174,7 +179,7 @@ func unmarshalHeaderMap(r reflect.Value, headers http.Header, prefix string, nor
 		out := map[string]*string{}
 		for k, v := range headers {
 			if util.HasPrefixFold(k, prefix) {
-				if normalize == true {
+				if normalize {
 					k = strings.ToLower(k)
 				} else {
 					k = http.CanonicalHeaderKey(k)
@@ -272,7 +277,7 @@ func unmarshalHeader(v reflect.Value, header string, tag reflect.StructTag) erro
 		}
 		v.Set(reflect.ValueOf(m))
 	default:
-		err := fmt.Errorf("Unsupported value for param %v (%s)", v.Interface(), v.Type())
+		err := fmt.Errorf("unsupported value for param %v (%s)", v.Interface(), v.Type())
 		return err
 	}
 	return nil

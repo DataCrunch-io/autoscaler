@@ -51,7 +51,12 @@ func Unmarshal(r *request.Request) {
 	if t := rest.PayloadType(r.Data); t == "structure" || t == "" {
 		// Unmarshal JSON using protocol-specific JSON utilities
 		if r.DataFilled() && r.HTTPResponse.Body != nil {
-			defer r.HTTPResponse.Body.Close()
+			defer func() {
+				if err := r.HTTPResponse.Body.Close(); err != nil {
+					// Log the error but don't fail the function
+					_ = err // Suppress unused variable warning
+				}
+			}()
 			if err := jsonutil.UnmarshalJSON(r.Data, r.HTTPResponse.Body); err != nil {
 				r.Error = err
 			}

@@ -51,6 +51,23 @@ const (
 	DefaultRetryerMaxThrottleDelay = 300 * time.Second
 )
 
+// NewDefaultRetryer creates a new DefaultRetryer with sensible defaults
+// This ensures users always get proper retry behavior even without explicit configuration
+func NewDefaultRetryer(maxRetries int) DefaultRetryer {
+	return DefaultRetryer{
+		NumMaxRetries:    maxRetries,
+		MinRetryDelay:    DefaultRetryerMinRetryDelay,
+		MinThrottleDelay: DefaultRetryerMinThrottleDelay,
+		MaxRetryDelay:    DefaultRetryerMaxRetryDelay,
+		MaxThrottleDelay: DefaultRetryerMaxThrottleDelay,
+	}
+}
+
+// NewDefaultRetryerWithDefaults creates a DefaultRetryer with the recommended default settings
+func NewDefaultRetryerWithDefaults() DefaultRetryer {
+	return NewDefaultRetryer(DefaultRetryerMaxNumRetries)
+}
+
 // MaxRetries returns the number of maximum returns the service will use to make
 // an individual API request.
 func (d DefaultRetryer) MaxRetries() int {

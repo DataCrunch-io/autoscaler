@@ -22,14 +22,14 @@ func GenerateRandomStringWithCharset(length int, charset string) (string, error)
 	if length <= 0 {
 		return "", fmt.Errorf("length must be positive")
 	}
-	
+
 	if len(charset) == 0 {
 		return "", fmt.Errorf("charset cannot be empty")
 	}
-	
+
 	result := make([]byte, length)
 	charsetLen := big.NewInt(int64(len(charset)))
-	
+
 	for i := 0; i < length; i++ {
 		randomIndex, err := rand.Int(rand.Reader, charsetLen)
 		if err != nil {
@@ -37,7 +37,7 @@ func GenerateRandomStringWithCharset(length int, charset string) (string, error)
 		}
 		result[i] = charset[randomIndex.Int64()]
 	}
-	
+
 	return string(result), nil
 }
 
@@ -52,13 +52,13 @@ func GenerateRandomBytes(length int) ([]byte, error) {
 	if length <= 0 {
 		return nil, fmt.Errorf("length must be positive")
 	}
-	
+
 	bytes := make([]byte, length)
 	_, err := rand.Read(bytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to generate random bytes: %v", err)
 	}
-	
+
 	return bytes, nil
 }
 
@@ -67,17 +67,17 @@ func GenerateRandomInt(min, max int64) (int64, error) {
 	if min > max {
 		return 0, fmt.Errorf("min cannot be greater than max")
 	}
-	
+
 	if min == max {
 		return min, nil
 	}
-	
+
 	diff := max - min + 1
 	randomValue, err := rand.Int(rand.Reader, big.NewInt(diff))
 	if err != nil {
 		return 0, fmt.Errorf("failed to generate random integer: %v", err)
 	}
-	
+
 	return min + randomValue.Int64(), nil
 }
 
@@ -87,11 +87,11 @@ func GenerateUUID() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	// Set version (4) and variant bits
 	bytes[6] = (bytes[6] & 0x0f) | 0x40 // Version 4
 	bytes[8] = (bytes[8] & 0x3f) | 0x80 // Variant 10
-	
+
 	return fmt.Sprintf("%08x-%04x-%04x-%04x-%012x",
 		bytes[0:4],
 		bytes[4:6],
@@ -105,17 +105,17 @@ func GenerateRandomDuration(min, max time.Duration) (time.Duration, error) {
 	if min > max {
 		return 0, fmt.Errorf("min cannot be greater than max")
 	}
-	
+
 	if min == max {
 		return min, nil
 	}
-	
+
 	diff := int64(max - min)
 	randomValue, err := GenerateRandomInt(0, diff)
 	if err != nil {
 		return 0, err
 	}
-	
+
 	return min + time.Duration(randomValue), nil
 }
 
@@ -126,6 +126,6 @@ func GenerateRequestID() (string, error) {
 	if err != nil {
 		return "", err
 	}
-	
+
 	return fmt.Sprintf("req_%x_%s", timestamp, randomPart), nil
 }

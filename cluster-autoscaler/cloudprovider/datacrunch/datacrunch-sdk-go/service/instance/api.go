@@ -2,8 +2,6 @@ package instance
 
 import (
 	"context"
-	"encoding/json"
-	"log"
 
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
 )
@@ -131,20 +129,10 @@ func (c *Instance) ListInstances(ctx context.Context) ([]*ListInstancesResponse,
 	}
 
 	var instances []*ListInstancesResponse
-	req := c.NewRequest(op, nil, &instances)
+	req := c.newRequest(op, nil, &instances)
 	req.SetContext(ctx)
 
-	// Log the request URL
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return nil, err
-	}
-
-	// Log the response
-	log.Printf("Successfully retrieved %d instances", len(instances))
-	return instances, nil
+	return instances, req.Send()
 }
 
 // CreateInstance creates a new compute instance
@@ -156,22 +144,10 @@ func (c *Instance) CreateInstance(ctx context.Context, input *CreateInstanceInpu
 	}
 
 	var instanceID string
-	req := c.NewRequest(op, input, &instanceID)
+	req := c.newRequest(op, input, &instanceID)
 	req.SetContext(ctx)
 
-	// Log the request URL and payload
-	if body, err := json.Marshal(input); err == nil {
-		log.Printf("Request payload: %s", string(body))
-	}
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return "", err
-	}
-
-	log.Printf("Successfully created instance: %s", instanceID)
-	return instanceID, nil
+	return instanceID, req.Send()
 }
 
 // PerformInstanceAction performs an action on an instance
@@ -182,20 +158,8 @@ func (c *Instance) PerformInstanceAction(ctx context.Context, input *InstanceAct
 		HTTPPath:   "/instances",
 	}
 
-	req := c.NewRequest(op, input, nil)
+	req := c.newRequest(op, input, nil)
 	req.SetContext(ctx)
 
-	// Log the request URL and payload
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-	if body, err := json.Marshal(input); err == nil {
-		log.Printf("Request payload: %s", string(body))
-	}
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return err
-	}
-
-	log.Printf("Successfully performed action %s on instance %s", input.Action, input.ID)
-	return nil
+	return req.Send()
 }

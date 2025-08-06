@@ -14,11 +14,11 @@ import (
 )
 
 // OAuth2Credentials represents OAuth2 client credentials with token caching
+// This is now a wrapper around the new credential system
 type OAuth2Credentials struct {
-	ClientID     string
-	ClientSecret string
-	BaseURL      string // e.g. "https://api.datacrunch.io"
+	creds *Credentials
 
+	// Cached OAuth2 state
 	AccessToken  string
 	RefreshToken string
 	Expiry       time.Time
@@ -37,10 +37,16 @@ type TokenResponse struct {
 
 // NewOAuth2Credentials creates a new OAuth2Credentials instance
 func NewOAuth2Credentials(clientID, clientSecret, baseURL string) *OAuth2Credentials {
+	creds := NewStaticCredentials(clientID, clientSecret, baseURL)
 	return &OAuth2Credentials{
-		ClientID:     clientID,
-		ClientSecret: clientSecret,
-		BaseURL:      baseURL,
+		creds: creds,
+	}
+}
+
+// NewOAuth2CredentialsFromProvider creates OAuth2Credentials with a credential provider
+func NewOAuth2CredentialsFromProvider(creds *Credentials) *OAuth2Credentials {
+	return &OAuth2Credentials{
+		creds: creds,
 	}
 }
 
@@ -74,12 +80,31 @@ func (c *OAuth2Credentials) GetToken(ctx context.Context) (string, error) {
 	return c.AccessToken, nil
 }
 
+// GetClientCredentials returns the client credentials for basic OAuth2 flows
+func (c *OAuth2Credentials) GetClientCredentials() (clientID, clientSecret string, err error) {
+	return c.creds.GetClientCredentials()
+}
+
+// GetBaseURL returns the base URL from credentials
+func (c *OAuth2Credentials) GetBaseURL() (string, error) {
+	credValue, err := c.creds.Get()
+	if err != nil {
+		return "", err
+	}
+	return credValue.BaseURL, nil
+}
+
 // fetchWithClientCredentials gets a new token using client credentials grant
 func (c *OAuth2Credentials) fetchWithClientCredentials(ctx context.Context) error {
+	clientID, clientSecret, err := c.creds.GetClientCredentials()
+	if err != nil {
+		return err
+	}
+
 	payload := map[string]string{
 		"grant_type":    "client_credentials",
-		"client_id":     c.ClientID,
-		"client_secret": c.ClientSecret,
+		"client_id":     clientID,
+		"client_secret": clientSecret,
 	}
 	return c.doTokenRequest(ctx, payload)
 }
@@ -89,19 +114,30 @@ func (c *OAuth2Credentials) refreshWithRefreshToken(ctx context.Context) error {
 	if c.RefreshToken == "" {
 		return errors.New("no refresh token available")
 	}
+
+	clientID, clientSecret, err := c.creds.GetClientCredentials()
+	if err != nil {
+		return err
+	}
+
 	payload := map[string]string{
 		"grant_type":    "refresh_token",
 		"refresh_token": c.RefreshToken,
-		"client_id":     c.ClientID,
-		"client_secret": c.ClientSecret,
+		"client_id":     clientID,
+		"client_secret": clientSecret,
 	}
 	return c.doTokenRequest(ctx, payload)
 }
 
 // doTokenRequest sends the token request and updates the credential fields
 func (c *OAuth2Credentials) doTokenRequest(ctx context.Context, payload map[string]string) error {
+	baseURL, err := c.GetBaseURL()
+	if err != nil {
+		return err
+	}
+
 	body, _ := json.Marshal(payload)
-	endpoint := c.BaseURL + "/v1/oauth2/token"
+	endpoint := baseURL + "/v1/oauth2/token"
 	log.Printf("Sending token request to %s", endpoint)
 	log.Printf("Request payload: %s", string(body))
 

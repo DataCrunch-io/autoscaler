@@ -259,8 +259,12 @@ func buildScalar(v reflect.Value, buf *bytes.Buffer, tag reflect.StructTag) erro
 					// for large buffers, avoid unnecessary extra temporary
 					// buffer space.
 					enc := base64.NewEncoder(base64.StdEncoding, buf)
-					enc.Write(converted)
-					enc.Close()
+					if _, err := enc.Write(converted); err != nil {
+						return fmt.Errorf("failed to write base64 encoded bytes: %v", err)
+					}
+					if err := enc.Close(); err != nil {
+						return fmt.Errorf("failed to close base64 encoder: %v", err)
+					}
 				}
 				buf.WriteByte('"')
 			}

@@ -4,15 +4,15 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client/metadata"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/internal/protocol/restjson"
 )
 
 const (
-	// EndpointsID is the service identifier
 	EndpointsID = "startscripts"
+	APIVersion  = "v1"
 )
 
 // StartScripts provides the API operation methods for making requests to
-// the startup scripts service.
 type StartScripts struct {
 	*client.Client
 }
@@ -23,14 +23,46 @@ type Client = *StartScripts
 // Used for custom client initialization logic
 var initClient func(*client.Client)
 
-// New creates a new instance of the startup scripts client with a session.
-func New(cfg *client.Config) *StartScripts {
+// Used for custom request initialization logic
+var initRequest func(*request.Request)
+
+type ConfigProvider interface {
+	ClientConfig(serviceName string, cfgs ...*interface{}) client.Config
+}
+
+// New creates a new instance of the StartScripts client with a config provider.
+// If additional configuration is needed for the client instance use the optional
+// client.Config parameter to add your extra config.
+//
+// Example:
+//
+//	mySession := session.Must(session.New())
+//
+//	// Create a StartScripts client from just a session.
+//	svc := startscripts.New(mySession)
+//
+//	// Create a StartScripts client with additional configuration
+//	svc := startscripts.New(mySession, &client.Config{Timeout: 60 * time.Second})
+func New(p ConfigProvider, cfgs ...*interface{}) *StartScripts {
+	c := p.ClientConfig(EndpointsID, cfgs...)
+	return newClient(c)
+}
+
+// newClient creates, initializes and returns a new service client instance.
+func newClient(cfg client.Config) *StartScripts {
+	handlers := request.Handlers{}
+
+	// Add protocol handlers for REST JSON
+	handlers.Build.PushBackNamed(restjson.BuildHandler)
+	handlers.Unmarshal.PushBackNamed(restjson.UnmarshalHandler)
+	handlers.Complete.PushBackNamed(restjson.UnmarshalMetaHandler)
+
 	svc := &StartScripts{
-		Client: client.New(cfg, metadata.ClientInfo{
+		Client: client.New(&cfg, metadata.ClientInfo{
 			ServiceName: EndpointsID,
-			APIVersion:  "v1",
-			Endpoint:    "https://api.datacrunch.io/v1",
-		}, request.Handlers{}),
+			APIVersion:  APIVersion,
+			Endpoint:    cfg.BaseURL,
+		}, handlers),
 	}
 
 	// Run custom client initialization if present
@@ -41,15 +73,13 @@ func New(cfg *client.Config) *StartScripts {
 	return svc
 }
 
-// NewRequest creates a new request for the startup scripts service.
-func (c *StartScripts) NewRequest(op *request.Operation, params, data interface{}) *request.Request {
-	req := c.Client.NewRequest(op, params, data)
-	req.HTTPRequest.Header.Set("Accept", "application/json")
-	return req
-}
+func (c *StartScripts) newRequest(op *request.Operation, params, data interface{}) *request.Request {
+	req := c.NewRequest(op, params, data)
 
-// NewClient creates a new start scripts client with the provided HTTP client wrapper
-func NewClient(httpClient interface{}) Client {
-	// For now, return a simple StartScripts client - this would be enhanced with proper client wrapping
-	return &StartScripts{}
+	// Run custom request initialization if present
+	if initRequest != nil {
+		initRequest(req)
+	}
+
+	return req
 }

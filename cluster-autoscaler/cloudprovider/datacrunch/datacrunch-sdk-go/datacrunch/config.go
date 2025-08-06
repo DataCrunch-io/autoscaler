@@ -1,164 +1,256 @@
 package datacrunch
 
 import (
-	"context"
-	"net/http"
 	"time"
 
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client/metadata"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/credentials"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/session"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/instance"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/instanceavailability"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/instancetypes"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/locations"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/sshkeys"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/startscripts"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/volumes"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/volumetypes"
 )
 
-type RequestRetryer interface{}
+// ClientConfig holds optional configuration for the DataCrunch SDK
+type ClientConfig struct {
+	// Optional timeout override
+	Timeout *time.Duration
 
-// Config holds configuration for the DataCrunch SDK
-type Config struct {
-	// API configuration
-	BaseURL      string
-	ClientID     string
-	ClientSecret string
-	Timeout      time.Duration
+	// Optional base URL override
+	BaseURL *string
 
-	// HTTP client configuration
-	Retryer       RequestRetryer
-	MaxRetries    int
-	RetryDelay    time.Duration
-	MaxRetryDelay time.Duration
+	// Optional credentials (for static credential use cases)
+	Credentials *credentials.Credentials
+
+	// Optional retry configuration
+	MaxRetries *int
+	Retryer    interface{}
 }
 
-// DefaultConfig returns a default configuration
-func DefaultConfig() *Config {
-	return &Config{
-		BaseURL:       "https://api.datacrunch.io/v1",
-		Timeout:       30 * time.Second,
-		MaxRetries:    3,
-		RetryDelay:    1 * time.Second,
-		MaxRetryDelay: 30 * time.Second,
-	}
-}
-
-// Client represents the main DataCrunch SDK client
+// Client represents a convenience wrapper that bundles all DataCrunch services
 type Client struct {
-	config *Config
+	// Session used by all services
+	Session *session.Session
 
-	// HTTP client
-	httpClient *client.Client
-
-	// Service clients
-	Instance     instance.Client
-	SSHKeys      sshkeys.Client
-	StartScripts startscripts.Client
+	// Service clients - all use the same session with credential chain
+	Instance             *instance.Instance
+	InstanceAvailability *instanceavailability.InstanceAvailability
+	InstanceTypes        *instancetypes.InstanceTypes
+	Locations            *locations.Locations
+	SSHKeys              *sshkeys.SSHKey
+	StartScripts         *startscripts.StartScripts
+	Volumes              *volumes.Volumes
+	VolumeTypes          *volumetypes.VolumeTypes
 }
 
-// New creates a new DataCrunch SDK client
-func New(config *Config) *Client {
-	if config == nil {
-		config = DefaultConfig()
+// Session represents a shared configuration and state for service clients
+type Session = *session.Session
+
+// Option is a functional option for configuring the DataCrunch client
+type Option func(*ClientConfig)
+
+// WithBaseURL sets the base URL for the API
+func WithBaseURL(baseURL string) Option {
+	return func(c *ClientConfig) {
+		c.BaseURL = &baseURL
+	}
+}
+
+// WithCredentials sets static OAuth2 client credentials
+func WithCredentials(clientID, clientSecret string) Option {
+	return func(c *ClientConfig) {
+		c.Credentials = credentials.NewStaticCredentials(clientID, clientSecret, "https://api.datacrunch.io")
+	}
+}
+
+// WithTimeout sets the HTTP client timeout
+func WithTimeout(timeout time.Duration) Option {
+	return func(c *ClientConfig) {
+		c.Timeout = &timeout
+	}
+}
+
+// WithCredentialsProvider sets custom credentials provider
+func WithCredentialsProvider(creds *credentials.Credentials) Option {
+	return func(c *ClientConfig) {
+		c.Credentials = creds
+	}
+}
+
+// New creates a new DataCrunch SDK client with optional configuration
+//
+// This is a convenience method that creates a session and all services.
+// For more control, create a session directly and individual services as needed.
+//
+// Example:
+//
+//	client := datacrunch.New() // Uses credential chain automatically
+//	client := datacrunch.New(datacrunch.WithCredentials("id", "secret"))
+func New(options ...Option) *Client {
+	config := &ClientConfig{}
+
+	// Apply all options
+	for _, option := range options {
+		option(config)
 	}
 
-	// Create HTTP client
-	httpClient := client.New(config, metadata.ClientInfo{
-		ServiceName: "datacrunch",
-		APIVersion:  "v1",
-		Endpoint:    config.BaseURL,
-	}, request.Handlers{})
+	// Build session options
+	var sessionOpts []func(*session.Options)
 
-	// Create wrapper for service clients
-	wrapper := &httpClientWrapper{client: httpClient}
+	if config.Timeout != nil {
+		sessionOpts = append(sessionOpts, session.WithTimeout(*config.Timeout))
+	}
+
+	if config.BaseURL != nil {
+		sessionOpts = append(sessionOpts, session.WithBaseURL(*config.BaseURL))
+	}
+
+	if config.Credentials != nil {
+		sessionOpts = append(sessionOpts, session.WithCredentialsProvider(config.Credentials))
+	}
+
+	if config.MaxRetries != nil {
+		sessionOpts = append(sessionOpts, session.WithMaxRetries(*config.MaxRetries))
+	}
+
+	if config.Retryer != nil {
+		sessionOpts = append(sessionOpts, session.WithRetryer(config.Retryer))
+	}
+
+	// Create session (uses credential chain by default)
+	sess := session.New(sessionOpts...)
 
 	return &Client{
-		config:       config,
-		httpClient:   httpClient,
-		Instance:     instance.NewClient(wrapper),
-		SSHKeys:      sshkeys.NewClient(wrapper),
-		StartScripts: startscripts.NewClient(wrapper),
+		Session:              sess,
+		Instance:             instance.New(sess),
+		InstanceAvailability: instanceavailability.New(sess),
+		InstanceTypes:        instancetypes.New(sess),
+		Locations:            locations.New(sess),
+		SSHKeys:              sshkeys.New(sess),
+		StartScripts:         startscripts.New(sess),
+		Volumes:              volumes.New(sess),
+		VolumeTypes:          volumetypes.New(sess),
 	}
 }
 
-// httpClientWrapper adapts the HTTP client for service clients
-type httpClientWrapper struct {
-	client *client.Client
-}
+// NewFromEnv creates a new DataCrunch SDK client using environment variables
+//
+// This is a convenience method equivalent to New() since the default credential
+// chain automatically tries environment variables first.
+//
+// Supported environment variables:
+// - DATACRUNCH_CLIENT_ID (OAuth2 client ID)
+// - DATACRUNCH_CLIENT_SECRET (OAuth2 client secret)
+// - DATACRUNCH_BASE_URL (API base URL, optional)
+// - DATACRUNCH_TIMEOUT (request timeout, optional)
+func NewFromEnv(options ...Option) *Client {
+	config := &ClientConfig{}
 
-// httpResponse adapts the HTTP response for service clients
-type httpResponse struct {
-	statusCode int
-	body       []byte
-	response   interface{}
-}
-
-// Post implements the APIClientInterface for service clients
-func (w *httpClientWrapper) Post(ctx context.Context, path string, body interface{}) (client.ResponseInterface, error) {
-	resp, err := w.client.Post(ctx, path, body)
-	if err != nil {
-		return nil, err
+	// Apply additional options (these can override defaults)
+	for _, option := range options {
+		option(config)
 	}
 
-	return &httpResponse{
-		statusCode: resp.StatusCode,
-		response:   resp,
-	}, nil
-}
-
-// Get implements the APIClientInterface for service clients
-func (w *httpClientWrapper) Get(ctx context.Context, path string) (client.ResponseInterface, error) {
-	resp, err := w.client.Get(ctx, path)
-	if err != nil {
-		return nil, err
+	// Build session options, start with env credentials
+	sessionOpts := []func(*session.Options){
+		session.WithCredentialsProvider(credentials.NewEnvCredentials()),
 	}
 
-	return &httpResponse{
-		statusCode: resp.StatusCode,
-		response:   resp,
-	}, nil
-}
-
-// Delete implements the APIClientInterface for service clients
-func (w *httpClientWrapper) Delete(ctx context.Context, path string) (client.ResponseInterface, error) {
-	resp, err := w.client.Delete(ctx, path)
-	if err != nil {
-		return nil, err
+	if config.Timeout != nil {
+		sessionOpts = append(sessionOpts, session.WithTimeout(*config.Timeout))
 	}
 
-	return &httpResponse{
-		statusCode: resp.StatusCode,
-		response:   resp,
-	}, nil
-}
-
-// Put implements the APIClientInterface for service clients
-func (w *httpClientWrapper) Put(ctx context.Context, path string, body interface{}) (client.ResponseInterface, error) {
-	resp, err := w.client.Put(ctx, path, body)
-	if err != nil {
-		return nil, err
+	if config.BaseURL != nil {
+		sessionOpts = append(sessionOpts, session.WithBaseURL(*config.BaseURL))
 	}
 
-	return &httpResponse{
-		statusCode: resp.StatusCode,
-		response:   resp,
-	}, nil
-}
+	// Create session with environment credentials
+	sess := session.New(sessionOpts...)
 
-// DecodeJSON implements ResponseInterface
-func (r *httpResponse) DecodeJSON(target interface{}) error {
-	if httpResp, ok := r.response.(*http.Response); ok {
-		// Use the client's DecodeResponse method
-		client := &client.Client{} // This is a placeholder - in real implementation would use the actual client
-		return client.DecodeResponse(httpResp, target)
+	return &Client{
+		Session:              sess,
+		Instance:             instance.New(sess),
+		InstanceAvailability: instanceavailability.New(sess),
+		InstanceTypes:        instancetypes.New(sess),
+		Locations:            locations.New(sess),
+		SSHKeys:              sshkeys.New(sess),
+		StartScripts:         startscripts.New(sess),
+		Volumes:              volumes.New(sess),
+		VolumeTypes:          volumetypes.New(sess),
 	}
-	return nil
 }
 
-// GetStatusCode implements ResponseInterface
-func (r *httpResponse) GetStatusCode() int {
-	return r.statusCode
+// NewWithCredentials creates a new DataCrunch SDK client with static credentials
+//
+// This is a convenience method for testing and development.
+// For production, prefer using New() with credential chain.
+func NewWithCredentials(clientID, clientSecret string, baseURL ...string) *Client {
+	var url string
+	if len(baseURL) > 0 {
+		url = baseURL[0]
+	} else {
+		url = "https://api.datacrunch.io"
+	}
+
+	creds := credentials.NewStaticCredentials(clientID, clientSecret, url)
+	return New(WithCredentialsProvider(creds))
 }
 
-// GetBody implements ResponseInterface
-func (r *httpResponse) GetBody() []byte {
-	return r.body
+// NewSession creates a new session with functional options
+func NewSession(options ...func(*session.Options)) Session {
+	return session.New(options...)
+}
+
+// NewSessionFromEnv creates a new session using environment variables
+func NewSessionFromEnv(options ...func(*session.Options)) Session {
+	return session.NewFromEnv(options...)
+}
+
+// NewWithSession creates a new DataCrunch SDK client with an existing session
+//
+// This is the recommended way when you need to share a session across
+// multiple clients or when you need fine control over session configuration.
+//
+// Example:
+//
+//	sess := session.New() // Uses credential chain
+//	client := datacrunch.NewWithSession(sess)
+func NewWithSession(sess Session) *Client {
+	return &Client{
+		Session:              sess,
+		Instance:             instance.New(sess),
+		InstanceAvailability: instanceavailability.New(sess),
+		InstanceTypes:        instancetypes.New(sess),
+		Locations:            locations.New(sess),
+		SSHKeys:              sshkeys.New(sess),
+		StartScripts:         startscripts.New(sess),
+		Volumes:              volumes.New(sess),
+		VolumeTypes:          volumetypes.New(sess),
+	}
+}
+
+// Legacy support - these methods maintain backward compatibility
+
+// WithRetryConfig configures retry behavior (supported again)
+func WithRetryConfig(maxRetries int, retryDelay, maxRetryDelay time.Duration) Option {
+	return func(c *ClientConfig) {
+		c.MaxRetries = &maxRetries
+		// Custom retry delays require custom retryer - use WithRetryer for that
+	}
+}
+
+// WithRetryer sets a custom retryer implementation (supported again)
+func WithRetryer(retryer interface{}) Option {
+	return func(c *ClientConfig) {
+		c.Retryer = retryer
+	}
+}
+
+// WithNoRetries disables retry functionality entirely
+func WithNoRetries() Option {
+	return WithRetryConfig(0, 0, 0)
 }

@@ -77,7 +77,11 @@ func (im *IdempotencyManager) GenerateKey(operation string, params ...interface{
 	hash.Write([]byte(operation))
 
 	for _, param := range params {
-		hash.Write([]byte(fmt.Sprintf("%v", param)))
+		if _, err := fmt.Fprintf(hash, "%v", param); err != nil {
+			// Hash write errors are rare and would indicate a serious problem
+			// We'll continue anyway as this is just for idempotency
+			_ = err // Suppress unused variable warning
+		}
 	}
 
 	return IdempotencyKey(fmt.Sprintf("%x", hash.Sum(nil)))

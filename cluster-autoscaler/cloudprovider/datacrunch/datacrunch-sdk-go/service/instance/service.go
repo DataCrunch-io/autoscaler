@@ -8,12 +8,12 @@ import (
 )
 
 const (
-	// EndpointsID is the service identifier
 	EndpointsID = "instance"
+	APIVersion  = "v1"
 )
 
 // Instance provides the API operation methods for making requests to
-// the instance service.
+// DataCrunch Instance API
 type Instance struct {
 	*client.Client
 }
@@ -27,20 +27,42 @@ var initClient func(*client.Client)
 // Used for custom request initialization logic
 var initRequest func(*request.Request)
 
-// New creates a new instance of the instance client with a session.
-func New(cfg *client.Config) *Instance {
+type ConfigProvider interface {
+	ClientConfig(serviceName string, cfgs ...*interface{}) client.Config
+}
+
+// New creates a new instance of the Instance client with a config provider.
+// If additional configuration is needed for the client instance use the optional
+// client.Config parameter to add your extra config.
+//
+// Example:
+//
+//	mySession := session.Must(session.New())
+//
+//	// Create a Instance client from just a session.
+//	svc := instance.New(mySession)
+//
+//	// Create a Instance client with additional configuration
+//	svc := instance.New(mySession, &client.Config{Timeout: 60 * time.Second})
+func New(p ConfigProvider, cfgs ...*interface{}) *Instance {
+	c := p.ClientConfig(EndpointsID, cfgs...)
+	return newClient(c)
+}
+
+// newClient creates, initializes and returns a new service client instance.
+func newClient(cfg client.Config) *Instance {
 	handlers := request.Handlers{}
-	
+
 	// Add protocol handlers for REST JSON
 	handlers.Build.PushBackNamed(restjson.BuildHandler)
 	handlers.Unmarshal.PushBackNamed(restjson.UnmarshalHandler)
 	handlers.Complete.PushBackNamed(restjson.UnmarshalMetaHandler)
-	
+
 	svc := &Instance{
-		Client: client.New(cfg, metadata.ClientInfo{
+		Client: client.New(&cfg, metadata.ClientInfo{
 			ServiceName: EndpointsID,
-			APIVersion:  "v1",
-			Endpoint:    "https://api.datacrunch.io/v1",
+			APIVersion:  APIVersion,
+			Endpoint:    cfg.BaseURL,
 		}, handlers),
 	}
 
@@ -52,15 +74,13 @@ func New(cfg *client.Config) *Instance {
 	return svc
 }
 
-// NewRequest creates a new request for the instance service.
-func (c *Instance) NewRequest(op *request.Operation, params, data interface{}) *request.Request {
-	req := c.Client.NewRequest(op, params, data)
-	req.HTTPRequest.Header.Set("Accept", "application/json")
-	return req
-}
+func (c *Instance) newRequest(op *request.Operation, params, data interface{}) *request.Request {
+	req := c.NewRequest(op, params, data)
 
-// NewClient creates a new instance client with the provided HTTP client wrapper
-func NewClient(httpClient interface{}) Client {
-	// For now, return a simple instance - this would be enhanced with proper client wrapping
-	return &Instance{}
+	// Run custom request initialization if present
+	if initRequest != nil {
+		initRequest(req)
+	}
+
+	return req
 }

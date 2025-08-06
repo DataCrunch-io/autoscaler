@@ -14,7 +14,7 @@ func HasPrefixFold(s, prefix string) bool {
 // ToSnakeCase converts a camelCase or PascalCase string to snake_case
 func ToSnakeCase(str string) string {
 	var result strings.Builder
-	
+
 	for i, r := range str {
 		if unicode.IsUpper(r) {
 			if i > 0 {
@@ -25,7 +25,7 @@ func ToSnakeCase(str string) string {
 			result.WriteRune(r)
 		}
 	}
-	
+
 	return result.String()
 }
 
@@ -35,10 +35,10 @@ func ToCamelCase(str string) string {
 	if len(words) == 0 {
 		return str
 	}
-	
+
 	var result strings.Builder
 	result.WriteString(strings.ToLower(words[0]))
-	
+
 	for _, word := range words[1:] {
 		if len(word) > 0 {
 			result.WriteString(strings.ToUpper(string(word[0])))
@@ -47,7 +47,7 @@ func ToCamelCase(str string) string {
 			}
 		}
 	}
-	
+
 	return result.String()
 }
 
@@ -55,7 +55,7 @@ func ToCamelCase(str string) string {
 func ToPascalCase(str string) string {
 	words := strings.Split(str, "_")
 	var result strings.Builder
-	
+
 	for _, word := range words {
 		if len(word) > 0 {
 			result.WriteString(strings.ToUpper(string(word[0])))
@@ -64,7 +64,7 @@ func ToPascalCase(str string) string {
 			}
 		}
 	}
-	
+
 	return result.String()
 }
 
@@ -125,14 +125,14 @@ func ContainsAnyIgnoreCase(str string, substrings ...string) bool {
 func SplitAndTrim(str, separator string) []string {
 	parts := strings.Split(str, separator)
 	result := make([]string, 0, len(parts))
-	
+
 	for _, part := range parts {
 		trimmed := strings.TrimSpace(part)
 		if trimmed != "" {
 			result = append(result, trimmed)
 		}
 	}
-	
+
 	return result
 }
 

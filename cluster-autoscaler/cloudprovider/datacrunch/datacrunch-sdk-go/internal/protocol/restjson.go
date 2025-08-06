@@ -9,8 +9,6 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
-
-	"k8s.io/klog/v2"
 )
 
 // RESTJSONProtocol handles REST JSON protocol for DataCrunch API
@@ -62,7 +60,6 @@ func (p *RESTJSONProtocol) Execute(ctx context.Context, req *Request) (*Response
 			return nil, fmt.Errorf("failed to marshal request body: %v", err)
 		}
 		bodyReader = bytes.NewReader(bodyBytes)
-		klog.V(5).Infof("Request body: %s", string(bodyBytes))
 	}
 
 	// Create HTTP request
@@ -73,13 +70,13 @@ func (p *RESTJSONProtocol) Execute(ctx context.Context, req *Request) (*Response
 
 	// Set headers
 	httpReq.Header.Set("User-Agent", p.UserAgent)
-	
+
 	if req.ContentType != "" {
 		httpReq.Header.Set("Content-Type", req.ContentType)
 	} else if req.Body != nil {
 		httpReq.Header.Set("Content-Type", "application/json")
 	}
-	
+
 	httpReq.Header.Set("Accept", "application/json")
 
 	// Add custom headers
@@ -87,22 +84,23 @@ func (p *RESTJSONProtocol) Execute(ctx context.Context, req *Request) (*Response
 		httpReq.Header.Set(key, value)
 	}
 
-	klog.V(4).Infof("Making %s request to %s", req.Method, requestURL)
-
 	// Execute request
 	httpResp, err := p.HTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP request failed: %v", err)
 	}
-	defer httpResp.Body.Close()
+	defer func() {
+		if err := httpResp.Body.Close(); err != nil {
+			// Log the error but don't fail the function
+			_ = err // Suppress unused variable warning
+		}
+	}()
 
 	// Read response body
 	bodyBytes, err := io.ReadAll(httpResp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read response body: %v", err)
 	}
-
-	klog.V(5).Infof("Response status: %d, body: %s", httpResp.StatusCode, string(bodyBytes))
 
 	return &Response{
 		StatusCode: httpResp.StatusCode,

@@ -5,19 +5,18 @@ import (
 	"net/http"
 	"time"
 
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/auth"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client/metadata"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
 )
 
 // ResponseInterface defines the common interface for HTTP responses
 type ResponseInterface interface {
 	// DecodeJSON decodes the response body into the target interface
 	DecodeJSON(target interface{}) error
-	
+
 	// GetStatusCode returns the HTTP status code
 	GetStatusCode() int
-	
+
 	// GetBody returns the response body as bytes
 	GetBody() []byte
 }
@@ -28,6 +27,8 @@ type Config struct {
 	ClientID     string
 	ClientSecret string
 	Timeout      time.Duration
+	MaxRetries   *int
+	Retryer      interface{}
 }
 
 // ConfigProvider provides a generic way for a service client to receive
@@ -61,22 +62,25 @@ func New(cfg interface{}, info metadata.ClientInfo, handlers request.Handlers, o
 		Handlers:   handlers.Copy(),
 	}
 
-	// switch retryer, ok := cfg.Retryer.(request.Retryer); {
-	// case ok:
-	// 	svc.Retryer = retryer
-	// case cfg.Retryer != nil && cfg.Logger != nil:
-	// 	s := fmt.Sprintf("WARNING: %T does not implement request.Retryer; using DefaultRetryer instead", cfg.Retryer)
-	// 	cfg.Logger.Log(s)
-	// 	fallthrough
-	// default:
-	// 	maxRetries := datacrunch.IntValue(cfg.MaxRetries)
-	// 	if cfg.MaxRetries == nil || maxRetries == datacrunch.UseServiceDefaultRetries {
-	// 		maxRetries = DefaultRetryerMaxNumRetries
-	// 	}
-	// 	svc.Retryer = DefaultRetryer{NumMaxRetries: maxRetries}
-	// }
-
-	svc.AddDebugHandlers()
+	// Configure retryer - always provide sensible defaults
+	if config, ok := cfg.(*Config); ok {
+		switch retryer, ok := config.Retryer.(request.Retryer); {
+		case ok:
+			// User provided custom retryer
+			svc.Retryer = retryer
+		default:
+			// Use DefaultRetryer with proper defaults
+			maxRetries := DefaultRetryerMaxNumRetries // Default to 3 retries
+			if config.MaxRetries != nil {
+				maxRetries = *config.MaxRetries
+			}
+			// Create retryer with sensible defaults for all timing values
+			svc.Retryer = NewDefaultRetryer(maxRetries)
+		}
+	} else {
+		// Fallback when config type is unknown - still provide good defaults
+		svc.Retryer = NewDefaultRetryer(DefaultRetryerMaxNumRetries)
+	}
 
 	for _, option := range options {
 		option(svc)
@@ -89,19 +93,6 @@ func New(cfg interface{}, info metadata.ClientInfo, handlers request.Handlers, o
 // operation and parameters.
 func (c *Client) NewRequest(operation *request.Operation, params interface{}, data interface{}) *request.Request {
 	return request.New(c.Config, c.Handlers, c.Retryer, operation, params, data)
-}
-
-// AddDebugHandlers injects debug logging handlers into the service to log request
-// debug information.
-func (c *Client) AddDebugHandlers() {
-	c.Handlers.Build.PushBackNamed(request.NamedHandler{
-		Name: "OAuth2AuthHandler",
-		Fn:   auth.OAuth2AuthHandler,
-	})
-	c.Handlers.Complete.PushBackNamed(request.NamedHandler{
-		Name: "DebugHandler",
-		Fn:   auth.DebugHandler,
-	})
 }
 
 // AddProtocolHandlers adds the REST JSON protocol handlers to the client
@@ -143,13 +134,32 @@ func (c *Client) makeRequest(ctx context.Context, method, path string, body inte
 		HTTPMethod: method,
 		HTTPPath:   path,
 	}
-	
+
 	req := c.NewRequest(operation, body, nil)
 	req.SetContext(ctx)
-	
+
 	if err := req.Send(); err != nil {
 		return nil, err
 	}
-	
+
 	return req.HTTPResponse, nil
+}
+
+// Do executes the given request and handles the response
+func (c *Client) Do(req *request.Request) error {
+	return req.Send()
+}
+
+// WithMaxRetries sets the maximum number of retries for the client
+func WithMaxRetries(maxRetries int) func(*Client) {
+	return func(c *Client) {
+		c.Retryer = DefaultRetryer{NumMaxRetries: maxRetries}
+	}
+}
+
+// WithRetryer sets a custom retryer for the client
+func WithRetryer(retryer request.Retryer) func(*Client) {
+	return func(c *Client) {
+		c.Retryer = retryer
+	}
 }
