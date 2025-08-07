@@ -22,6 +22,15 @@ type DatacrunchCloudProvider struct {
 	resourceLimiter *cloudprovider.ResourceLimiter
 }
 
+// DatacrunchAsgSpec holds ASG specification
+type DatacrunchAsgSpec struct {
+	minSize      int
+	maxSize      int
+	instanceType string
+	location     string
+	name         string
+}
+
 // newDatacrunchCloudProvider implement CloudProvider interface
 func newDatacrunchCloudProvider(manager *DatacrunchManager, rl *cloudprovider.ResourceLimiter) (*DatacrunchCloudProvider, error) {
 	return &DatacrunchCloudProvider{
@@ -35,16 +44,19 @@ func (d *DatacrunchCloudProvider) Name() string {
 	return cloudprovider.DatacrunchProviderName
 }
 
-// NodeGroups returns all node groups configured for this cloud provider
+// NodeGroups returns all ASGs configured for this cloud provider
 func (d *DatacrunchCloudProvider) NodeGroups() []cloudprovider.NodeGroup {
-	groups := make([]cloudprovider.NodeGroup, 0, len(d.manager.nodeGroups))
-	for groupId := range d.manager.nodeGroups {
-		groups = append(groups, d.manager.nodeGroups[groupId])
+	d.manager.asgs.cacheMutex.Lock()
+	defer d.manager.asgs.cacheMutex.Unlock()
+	
+	groups := make([]cloudprovider.NodeGroup, 0, len(d.manager.asgs.registeredAsgs))
+	for _, asg := range d.manager.asgs.registeredAsgs {
+		groups = append(groups, asg.config)
 	}
 	return groups
 }
 
-// NodeGroupForNode returns the node group for the given node
+// NodeGroupForNode returns the ASG for the given node
 func (d *DatacrunchCloudProvider) NodeGroupForNode(node *apiv1.Node) (cloudprovider.NodeGroup, error) {
 	instanceID, hostname, err := toInstanceIDAndHostname(node.Spec.ProviderID)
 	if err != nil {
@@ -55,20 +67,13 @@ func (d *DatacrunchCloudProvider) NodeGroupForNode(node *apiv1.Node) (cloudprovi
 	// @todo to consider first
 	klog.V(4).Infof("Found instanceID: %s, hostname: %s for node %s", instanceID, hostname, node.Name)
 
-	// find the nodegroup from manager.nodeGroups by instanceID
-	for _, ng := range d.manager.nodeGroups {
-		instances, err := ng.Nodes()
-		if err != nil {
-			return nil, err
-		}
-
-		for _, instance := range instances {
-			if instance.Id != instanceID {
-				continue
-			}
-
-			return ng, nil
-		}
+	// Use the registry to find the ASG for this instance
+	asg, err := d.manager.GetAsgForInstance(instanceID)
+	if err != nil {
+		return nil, err
+	}
+	if asg != nil {
+		return asg, nil
 	}
 
 	// do we need consider label ??? datacrunch.io/node-group
@@ -118,7 +123,7 @@ func (d *DatacrunchCloudProvider) GetAvailableMachineTypes() ([]string, error) {
 	return []string{}, nil
 }
 
-// NewNodeGroup builds a theoretical node group based on the node definition provided
+// NewNodeGroup builds a theoretical ASG based on the node definition provided
 func (d *DatacrunchCloudProvider) NewNodeGroup(machineType string, labels map[string]string, systemLabels map[string]string,
 	taints []apiv1.Taint, extraResources map[string]resource.Quantity) (cloudprovider.NodeGroup, error) {
 	return nil, cloudprovider.ErrNotImplemented
@@ -199,51 +204,49 @@ func BuildDatacrunch(
 		klog.Fatalf("Failed to create DataCrunch cloud provider: %v", err)
 	}
 
-	// add static node groups
+	// add static ASGs
 	if do.StaticDiscoverySpecified() {
-		err := provider.addStaticNodeGroups(do.NodeGroupSpecs)
+		err := provider.addStaticASGs(do.NodeGroupSpecs)
 		if err != nil {
-			klog.Fatalf("Failed to add static node groups: %v", err)
+			klog.Fatalf("Failed to add static ASGs: %v", err)
 		}
 	}
 
 	return provider
 }
 
-func (d *DatacrunchCloudProvider) addStaticNodeGroups(nodeGroupSpecs []string) error {
-	for _, spec := range nodeGroupSpecs {
-		ngSpec, err := d.parseNodeGroupSpec(spec)
+func (d *DatacrunchCloudProvider) addStaticASGs(asgSpecs []string) error {
+	for _, spec := range asgSpecs {
+		asgSpec, err := d.parseAsgSpec(spec)
 		if err != nil {
-			klog.Errorf("Failed to parse node group spec: %v", err)
+			klog.Errorf("Failed to parse ASG spec: %v", err)
+			return err
 		}
 
-		instances, err := d.manager.allInstances(ngSpec.name)
-		if err != nil {
-			klog.Errorf("Failed to get instances for node group: %v", err)
+		// Initialize ASG wrapper for this static group
+		asg := &Asg{
+			manager:      d.manager,
+			id:           asgSpec.name,
+			minSize:      asgSpec.minSize,
+			maxSize:      asgSpec.maxSize,
+			locationCode: asgSpec.location,
+			instanceType: asgSpec.instanceType,
 		}
-
-		d.manager.nodeGroups[ngSpec.name] = &DatacrunchNodeGroup{
-			name:         ngSpec.name,
-			instanceType: ngSpec.instanceType,
-			location:     ngSpec.location,
-			minSize:      ngSpec.minSize,
-			maxSize:      ngSpec.maxSize,
-			targetSize:   len(instances),
-		}
+		d.manager.RegisterAsg(asg)
 	}
 	return nil
 }
 
-// parse format: min:max:instance-type:region:nodegroup-name
-func (d *DatacrunchCloudProvider) parseNodeGroupSpec(spec string) (*DatacrunchNodeGroupSpec, error) {
+// parse format: min:max:instance-type:region:asg-name
+func (d *DatacrunchCloudProvider) parseAsgSpec(spec string) (*DatacrunchAsgSpec, error) {
 	parts := strings.Split(spec, ":")
 	if len(parts) != 5 {
-		return nil, fmt.Errorf("invalid node group spec: %s", spec)
+		return nil, fmt.Errorf("invalid ASG spec: %s", spec)
 	}
 
 	instanceType := parts[2]
 	region := parts[3]
-	nodegroupName := parts[4]
+	asgName := parts[4]
 
 	minSize, err := strconv.Atoi(parts[0])
 	if err != nil {
@@ -255,17 +258,17 @@ func (d *DatacrunchCloudProvider) parseNodeGroupSpec(spec string) (*DatacrunchNo
 		return nil, fmt.Errorf("invalid max size: %s", parts[1])
 	}
 
-	validNodePoolName := regexp.MustCompile(`^[a-z0-9A-Z]+[a-z0-9A-Z\-\.\_]*[a-z0-9A-Z]+$|^[a-z0-9A-Z]{1}$`)
-	if !validNodePoolName.MatchString(nodegroupName) {
-		return nil, fmt.Errorf("invalid node group name: %s", nodegroupName)
+	validAsgName := regexp.MustCompile(`^[a-z0-9A-Z]+[a-z0-9A-Z\-\.\_]*[a-z0-9A-Z]+$|^[a-z0-9A-Z]{1}$`)
+	if !validAsgName.MatchString(asgName) {
+		return nil, fmt.Errorf("invalid ASG name: %s", asgName)
 	}
 
-	return &DatacrunchNodeGroupSpec{
+	return &DatacrunchAsgSpec{
 		minSize:      minSize,
 		maxSize:      maxSize,
 		instanceType: instanceType,
 		location:     region,
-		name:         nodegroupName,
+		name:         asgName,
 	}, nil
 }
 

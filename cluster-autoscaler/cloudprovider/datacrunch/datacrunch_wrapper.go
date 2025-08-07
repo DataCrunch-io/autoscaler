@@ -1,23 +1,55 @@
 package datacrunch
 
 import (
+	"fmt"
+
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/instance"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/instancetypes"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/startscripts"
 )
 
 type instanceI interface {
 	ListInstances() ([]*instance.ListInstancesResponse, error)
 	CreateInstance(input *instance.CreateInstanceInput) (string, error)
+	PerformInstanceAction(input *instance.InstanceActionInput) error
 }
 
 type instanceTypesI interface {
 	ListInstanceTypes() ([]*instancetypes.InstanceTypeResponse, error)
 }
 
+type startScriptsI interface {
+	ListStartScripts() ([]*startscripts.StartScriptResponse, error)
+	CreateStartScript(input *startscripts.CreateStartScriptInput) (string, error)
+	DeleteStartScript(id string) error
+}
+
 // DatacrunchWrapper provides high-level operations for DataCrunch instances with environment variable injection
 type datacrunchWrapper struct {
 	instanceI
 	instanceTypesI
+	startScriptsI
+}
+
+// GetInstanceType retrieves instance type information
+func (d *datacrunchWrapper) GetInstanceType(instanceTypeName string) (*InstanceType, error) {
+	instanceTypes, err := d.ListInstanceTypes()
+	if err != nil {
+		return nil, err
+	}
+
+	for _, it := range instanceTypes {
+		if it.InstanceType == instanceTypeName {
+			return &InstanceType{
+				CPU:    int64(it.CPU.NumberOfCores),
+				Memory: int64(it.Memory.SizeInGigabytes) * 1024 * 1024 * 1024, // Convert GB to bytes
+				GPU:    int64(it.GPU.NumberOfGPUs),
+			}, nil
+		}
+	}
+
+	// Return default values if not found
+	return nil, fmt.Errorf("instance type %s not found", instanceTypeName)
 }
 
 // // CreateInstanceWithTemplate creates an instance with environment variable injection
