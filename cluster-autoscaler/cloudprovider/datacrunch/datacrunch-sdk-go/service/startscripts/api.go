@@ -1,10 +1,7 @@
 package startscripts
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"log"
 
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
 )
@@ -28,7 +25,7 @@ type DeleteStartScriptsInput struct {
 }
 
 // ListStartScripts lists all startup scripts
-func (c *StartScripts) ListStartScripts(ctx context.Context) ([]*StartScriptResponse, error) {
+func (c *StartScripts) ListStartScripts() ([]*StartScriptResponse, error) {
 	op := &request.Operation{
 		Name:       "ListStartScripts",
 		HTTPMethod: "GET",
@@ -36,22 +33,13 @@ func (c *StartScripts) ListStartScripts(ctx context.Context) ([]*StartScriptResp
 	}
 
 	var scripts []*StartScriptResponse
-	req := c.NewRequest(op, nil, &scripts)
-	req.SetContext(ctx)
+	req := c.newRequest(op, nil, &scripts)
 
-	// Log the request URL
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return nil, err
-	}
-
-	return scripts, nil
+	return scripts, req.Send()
 }
 
 // GetStartScript gets a single startup script by ID
-func (c *StartScripts) GetStartScript(ctx context.Context, id string) (*StartScriptResponse, error) {
+func (c *StartScripts) GetStartScript(id string) (*StartScriptResponse, error) {
 	op := &request.Operation{
 		Name:       "GetStartScript",
 		HTTPMethod: "GET",
@@ -59,22 +47,13 @@ func (c *StartScripts) GetStartScript(ctx context.Context, id string) (*StartScr
 	}
 
 	var script StartScriptResponse
-	req := c.NewRequest(op, nil, &script)
-	req.SetContext(ctx)
+	req := c.newRequest(op, nil, &script)
 
-	// Log the request URL
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return nil, err
-	}
-
-	return &script, nil
+	return &script, req.Send()
 }
 
 // CreateStartScript creates a new startup script
-func (c *StartScripts) CreateStartScript(ctx context.Context, input *CreateStartScriptInput) (string, error) {
+func (c *StartScripts) CreateStartScript(input *CreateStartScriptInput) (string, error) {
 	op := &request.Operation{
 		Name:       "CreateStartScript",
 		HTTPMethod: "POST",
@@ -82,67 +61,33 @@ func (c *StartScripts) CreateStartScript(ctx context.Context, input *CreateStart
 	}
 
 	var scriptID string
-	req := c.NewRequest(op, input, &scriptID)
-	req.SetContext(ctx)
+	req := c.newRequest(op, input, &scriptID)
 
-	// Log the request URL and payload
-	if body, err := json.Marshal(input); err == nil {
-		log.Printf("Request payload: %s", string(body))
-	}
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return "", err
-	}
-
-	log.Printf("Successfully created startup script: %s", scriptID)
-	return scriptID, nil
+	return scriptID, req.Send()
 }
 
 // DeleteStartScripts deletes multiple startup scripts
-func (c *StartScripts) DeleteStartScripts(ctx context.Context, input *DeleteStartScriptsInput) error {
+func (c *StartScripts) DeleteStartScripts(input *DeleteStartScriptsInput) error {
 	op := &request.Operation{
 		Name:       "DeleteStartScripts",
 		HTTPMethod: "DELETE",
 		HTTPPath:   "/scripts",
 	}
 
-	req := c.NewRequest(op, input, nil)
-	req.SetContext(ctx)
+	req := c.newRequest(op, input, nil)
 
-	// Log the request URL and payload
-	if body, err := json.Marshal(input); err == nil {
-		log.Printf("Request payload: %s", string(body))
-	}
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return err
-	}
-
-	return nil
+	return req.Send()
 }
 
 // DeleteStartScript deletes a single startup script by ID
-func (c *StartScripts) DeleteStartScript(ctx context.Context, id string) error {
+func (c *StartScripts) DeleteStartScript(id string) error {
 	op := &request.Operation{
 		Name:       "DeleteStartScript",
 		HTTPMethod: "DELETE",
 		HTTPPath:   fmt.Sprintf("/scripts/%s", id),
 	}
 
-	req := c.NewRequest(op, nil, nil)
-	req.SetContext(ctx)
+	req := c.newRequest(op, nil, nil)
 
-	// Log the request URL
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return err
-	}
-
-	return nil
+	return req.Send()
 }

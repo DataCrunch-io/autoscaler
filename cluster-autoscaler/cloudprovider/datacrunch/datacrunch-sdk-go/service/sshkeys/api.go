@@ -1,10 +1,7 @@
 package sshkeys
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"log"
 
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
 )
@@ -28,7 +25,7 @@ type DeleteSSHKeysInput struct {
 }
 
 // ListSSHKeys lists all SSH keys
-func (c *SSHKey) ListSSHKeys(ctx context.Context) ([]*SSHKeyResponse, error) {
+func (c *SSHKey) ListSSHKeys() ([]*SSHKeyResponse, error) {
 	op := &request.Operation{
 		Name:       "ListSSHKeys",
 		HTTPMethod: "GET",
@@ -36,22 +33,13 @@ func (c *SSHKey) ListSSHKeys(ctx context.Context) ([]*SSHKeyResponse, error) {
 	}
 
 	var sshKeys []*SSHKeyResponse
-	req := c.NewRequest(op, nil, &sshKeys)
-	req.SetContext(ctx)
+	req := c.newRequest(op, nil, &sshKeys)
 
-	// Log the request URL
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return nil, err
-	}
-
-	return sshKeys, nil
+	return sshKeys, req.Send()
 }
 
 // GetSSHKey gets a single SSH key by ID
-func (c *SSHKey) GetSSHKey(ctx context.Context, id string) (*SSHKeyResponse, error) {
+func (c *SSHKey) GetSSHKey(id string) (*SSHKeyResponse, error) {
 	op := &request.Operation{
 		Name:       "GetSSHKey",
 		HTTPMethod: "GET",
@@ -59,22 +47,13 @@ func (c *SSHKey) GetSSHKey(ctx context.Context, id string) (*SSHKeyResponse, err
 	}
 
 	var sshKey SSHKeyResponse
-	req := c.NewRequest(op, nil, &sshKey)
-	req.SetContext(ctx)
+	req := c.newRequest(op, nil, &sshKey)
 
-	// Log the request URL
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return nil, err
-	}
-
-	return &sshKey, nil
+	return &sshKey, req.Send()
 }
 
 // CreateSSHKey creates a new SSH key
-func (c *SSHKey) CreateSSHKey(ctx context.Context, input *CreateSSHKeyInput) (*SSHKeyResponse, error) {
+func (c *SSHKey) CreateSSHKey(input *CreateSSHKeyInput) (*SSHKeyResponse, error) {
 	op := &request.Operation{
 		Name:       "CreateSSHKey",
 		HTTPMethod: "POST",
@@ -82,66 +61,37 @@ func (c *SSHKey) CreateSSHKey(ctx context.Context, input *CreateSSHKeyInput) (*S
 	}
 
 	var sshKey SSHKeyResponse
-	req := c.NewRequest(op, input, &sshKey)
-	req.SetContext(ctx)
+	req := c.newRequest(op, input, &sshKey)
 
-	// Log the request URL and payload
-	if body, err := json.Marshal(input); err == nil {
-		log.Printf("Request payload: %s", string(body))
-	}
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return nil, err
-	}
-
-	return &sshKey, nil
+	return &sshKey, req.Send()
 }
 
 // DeleteSSHKeys deletes multiple SSH keys
-func (c *SSHKey) DeleteSSHKeys(ctx context.Context, input *DeleteSSHKeysInput) error {
+func (c *SSHKey) DeleteSSHKeys(input *DeleteSSHKeysInput) error {
 	op := &request.Operation{
 		Name:       "DeleteSSHKeys",
 		HTTPMethod: "DELETE",
 		HTTPPath:   "/sshkeys",
 	}
 
-	req := c.NewRequest(op, input, nil)
-	req.SetContext(ctx)
+	req := c.newRequest(op, input, nil)
 
-	// Log the request URL and payload
-	if body, err := json.Marshal(input); err == nil {
-		log.Printf("Request payload: %s", string(body))
-	}
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
 	if err := req.Send(); err != nil {
 		return err
 	}
 
-	return nil
+	return req.Send()
 }
 
 // DeleteSSHKey deletes a single SSH key by ID
-func (c *SSHKey) DeleteSSHKey(ctx context.Context, id string) error {
+func (c *SSHKey) DeleteSSHKey(id string) error {
 	op := &request.Operation{
 		Name:       "DeleteSSHKey",
 		HTTPMethod: "DELETE",
 		HTTPPath:   fmt.Sprintf("/sshkeys/%s", id),
 	}
 
-	req := c.NewRequest(op, nil, nil)
-	req.SetContext(ctx)
+	req := c.newRequest(op, nil, nil)
 
-	// Log the request URL
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return err
-	}
-
-	return nil
+	return req.Send()
 }

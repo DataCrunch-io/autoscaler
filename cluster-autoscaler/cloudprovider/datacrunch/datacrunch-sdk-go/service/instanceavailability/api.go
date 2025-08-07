@@ -1,9 +1,7 @@
 package instanceavailability
 
 import (
-	"context"
 	"fmt"
-	"log"
 
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
 )
@@ -20,7 +18,7 @@ type InstanceAvailabilityResponse struct {
 }
 
 // ListInstanceAvailability lists all available instance types by location
-func (c *InstanceAvailability) ListInstanceAvailability(ctx context.Context) ([]*InstanceAvailabilityResponse, error) {
+func (c *InstanceAvailability) ListInstanceAvailability() ([]*InstanceAvailabilityResponse, error) {
 	op := &request.Operation{
 		Name:       "ListInstanceAvailability",
 		HTTPMethod: "GET",
@@ -28,24 +26,13 @@ func (c *InstanceAvailability) ListInstanceAvailability(ctx context.Context) ([]
 	}
 
 	var availabilities []*InstanceAvailabilityResponse
-	req := c.NewRequest(op, nil, &availabilities)
-	req.SetContext(ctx)
+	req := c.newRequest(op, nil, &availabilities)
 
-	// Log the request URL
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return nil, err
-	}
-
-	// Log the response
-	log.Printf("Successfully retrieved availability for %d locations", len(availabilities))
-	return availabilities, nil
+	return availabilities, req.Send()
 }
 
 // CheckInstanceAvailability checks if a specific instance type is available
-func (c *InstanceAvailability) CheckInstanceAvailability(ctx context.Context, instanceType string) (bool, error) {
+func (c *InstanceAvailability) CheckInstanceAvailability(instanceType string) (bool, error) {
 	op := &request.Operation{
 		Name:       "CheckInstanceAvailability",
 		HTTPMethod: "GET",
@@ -53,17 +40,7 @@ func (c *InstanceAvailability) CheckInstanceAvailability(ctx context.Context, in
 	}
 
 	var available bool
-	req := c.NewRequest(op, nil, &available)
-	req.SetContext(ctx)
+	req := c.newRequest(op, nil, &available)
 
-	// Log the request URL
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return false, err
-	}
-
-	log.Printf("Instance type %s availability: %v", instanceType, available)
-	return available, nil
+	return available, req.Send()
 }

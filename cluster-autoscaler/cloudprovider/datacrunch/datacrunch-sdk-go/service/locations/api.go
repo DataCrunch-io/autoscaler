@@ -1,9 +1,6 @@
 package locations
 
 import (
-	"context"
-	"log"
-
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
 )
 
@@ -15,7 +12,7 @@ type LocationResponse struct {
 }
 
 // ListLocations lists all available locations
-func (c *Locations) ListLocations(ctx context.Context) ([]*LocationResponse, error) {
+func (c *Locations) ListLocations() ([]*LocationResponse, error) {
 	op := &request.Operation{
 		Name:       "ListLocations",
 		HTTPMethod: "GET",
@@ -23,16 +20,7 @@ func (c *Locations) ListLocations(ctx context.Context) ([]*LocationResponse, err
 	}
 
 	var locations []*LocationResponse
-	req := c.NewRequest(op, nil, &locations)
-	req.SetContext(ctx)
+	req := c.newRequest(op, nil, &locations)
 
-	// Log the request URL
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return nil, err
-	}
-
-	return locations, nil
+	return locations, req.Send()
 }

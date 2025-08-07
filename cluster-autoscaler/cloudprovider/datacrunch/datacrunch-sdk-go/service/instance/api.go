@@ -1,8 +1,6 @@
 package instance
 
 import (
-	"context"
-
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
 )
 
@@ -121,7 +119,7 @@ type InstanceActionInput struct {
 }
 
 // ListInstances lists all instances
-func (c *Instance) ListInstances(ctx context.Context) ([]*ListInstancesResponse, error) {
+func (c *Instance) ListInstances() ([]*ListInstancesResponse, error) {
 	op := &request.Operation{
 		Name:       "ListInstances",
 		HTTPMethod: "GET",
@@ -130,13 +128,12 @@ func (c *Instance) ListInstances(ctx context.Context) ([]*ListInstancesResponse,
 
 	var instances []*ListInstancesResponse
 	req := c.newRequest(op, nil, &instances)
-	req.SetContext(ctx)
 
 	return instances, req.Send()
 }
 
 // CreateInstance creates a new compute instance
-func (c *Instance) CreateInstance(ctx context.Context, input *CreateInstanceInput) (string, error) {
+func (c *Instance) CreateInstance(input *CreateInstanceInput) (string, error) {
 	op := &request.Operation{
 		Name:       "CreateInstance",
 		HTTPMethod: "POST",
@@ -145,13 +142,12 @@ func (c *Instance) CreateInstance(ctx context.Context, input *CreateInstanceInpu
 
 	var instanceID string
 	req := c.newRequest(op, input, &instanceID)
-	req.SetContext(ctx)
 
 	return instanceID, req.Send()
 }
 
 // PerformInstanceAction performs an action on an instance
-func (c *Instance) PerformInstanceAction(ctx context.Context, input *InstanceActionInput) error {
+func (c *Instance) PerformInstanceAction(input *InstanceActionInput) error {
 	op := &request.Operation{
 		Name:       "PerformInstanceAction",
 		HTTPMethod: "PUT",
@@ -159,7 +155,6 @@ func (c *Instance) PerformInstanceAction(ctx context.Context, input *InstanceAct
 	}
 
 	req := c.newRequest(op, input, nil)
-	req.SetContext(ctx)
 
 	return req.Send()
 }

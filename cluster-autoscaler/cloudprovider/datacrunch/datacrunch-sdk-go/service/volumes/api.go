@@ -1,10 +1,7 @@
 package volumes
 
 import (
-	"context"
-	"encoding/json"
 	"fmt"
-	"log"
 
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
 )
@@ -80,7 +77,7 @@ type VolumeActionInput struct {
 }
 
 // ListVolumes lists all volumes
-func (c *Volumes) ListVolumes(ctx context.Context) ([]*VolumeResponse, error) {
+func (c *Volumes) ListVolumes() ([]*VolumeResponse, error) {
 	op := &request.Operation{
 		Name:       "ListVolumes",
 		HTTPMethod: "GET",
@@ -88,22 +85,13 @@ func (c *Volumes) ListVolumes(ctx context.Context) ([]*VolumeResponse, error) {
 	}
 
 	var volumes []*VolumeResponse
-	req := c.NewRequest(op, nil, &volumes)
-	req.SetContext(ctx)
+	req := c.newRequest(op, nil, &volumes)
 
-	// Log the request URL
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return nil, err
-	}
-
-	return volumes, nil
+	return volumes, req.Send()
 }
 
 // GetVolume gets a volume by ID
-func (c *Volumes) GetVolume(ctx context.Context, id string) (*VolumeResponse, error) {
+func (c *Volumes) GetVolume(id string) (*VolumeResponse, error) {
 	op := &request.Operation{
 		Name:       "GetVolume",
 		HTTPMethod: "GET",
@@ -111,22 +99,13 @@ func (c *Volumes) GetVolume(ctx context.Context, id string) (*VolumeResponse, er
 	}
 
 	var volume VolumeResponse
-	req := c.NewRequest(op, nil, &volume)
-	req.SetContext(ctx)
+	req := c.newRequest(op, nil, &volume)
 
-	// Log the request URL
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return nil, err
-	}
-
-	return &volume, nil
+	return &volume, req.Send()
 }
 
 // CreateVolume creates a new volume
-func (c *Volumes) CreateVolume(ctx context.Context, input *CreateVolumeInput) (string, error) {
+func (c *Volumes) CreateVolume(input *CreateVolumeInput) (string, error) {
 	op := &request.Operation{
 		Name:       "CreateVolume",
 		HTTPMethod: "POST",
@@ -134,52 +113,26 @@ func (c *Volumes) CreateVolume(ctx context.Context, input *CreateVolumeInput) (s
 	}
 
 	var volumeID string
-	req := c.NewRequest(op, input, &volumeID)
-	req.SetContext(ctx)
+	req := c.newRequest(op, input, &volumeID)
 
-	// Log the request URL and payload
-	if body, err := json.Marshal(input); err == nil {
-		log.Printf("Request payload: %s", string(body))
-	}
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return "", err
-	}
-
-	log.Printf("Successfully created volume: %s", volumeID)
-	return volumeID, nil
+	return volumeID, req.Send()
 }
 
 // PerformVolumeAction performs an action on a volume
-func (c *Volumes) PerformVolumeAction(ctx context.Context, input *VolumeActionInput) error {
+func (c *Volumes) PerformVolumeAction(input *VolumeActionInput) error {
 	op := &request.Operation{
 		Name:       "PerformVolumeAction",
 		HTTPMethod: "PUT",
 		HTTPPath:   "/volumes",
 	}
 
-	req := c.NewRequest(op, input, nil)
-	req.SetContext(ctx)
+	req := c.newRequest(op, input, nil)
 
-	// Log the request URL and payload
-	if body, err := json.Marshal(input); err == nil {
-		log.Printf("Request payload: %s", string(body))
-	}
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return err
-	}
-
-	log.Printf("Successfully performed action %s on volume %s", input.Action, input.ID)
-	return nil
+	return req.Send()
 }
 
 // ListTrashVolumes lists all volumes in trash
-func (c *Volumes) ListTrashVolumes(ctx context.Context) ([]*VolumeResponse, error) {
+func (c *Volumes) ListTrashVolumes() ([]*VolumeResponse, error) {
 	op := &request.Operation{
 		Name:       "ListTrashVolumes",
 		HTTPMethod: "GET",
@@ -187,22 +140,13 @@ func (c *Volumes) ListTrashVolumes(ctx context.Context) ([]*VolumeResponse, erro
 	}
 
 	var volumes []*VolumeResponse
-	req := c.NewRequest(op, nil, &volumes)
-	req.SetContext(ctx)
+	req := c.newRequest(op, nil, &volumes)
 
-	// Log the request URL
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return nil, err
-	}
-
-	return volumes, nil
+	return volumes, req.Send()
 }
 
 // DeleteVolume deletes a volume by ID
-func (c *Volumes) DeleteVolume(ctx context.Context, id string, isPermanent bool) error {
+func (c *Volumes) DeleteVolume(id string, isPermanent bool) error {
 	op := &request.Operation{
 		Name:       "DeleteVolume",
 		HTTPMethod: "DELETE",
@@ -215,20 +159,7 @@ func (c *Volumes) DeleteVolume(ctx context.Context, id string, isPermanent bool)
 		IsPermanent: isPermanent,
 	}
 
-	req := c.NewRequest(op, input, nil)
-	req.SetContext(ctx)
+	req := c.newRequest(op, input, nil)
 
-	// Log the request URL and payload
-	if body, err := json.Marshal(input); err == nil {
-		log.Printf("Request payload: %s", string(body))
-	}
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return err
-	}
-
-	log.Printf("Successfully deleted volume %s (permanent: %v)", id, isPermanent)
-	return nil
+	return req.Send()
 }

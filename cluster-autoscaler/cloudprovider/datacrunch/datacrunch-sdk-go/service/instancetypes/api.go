@@ -1,9 +1,6 @@
 package instancetypes
 
 import (
-	"context"
-	"log"
-
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
 )
 
@@ -68,7 +65,7 @@ type PriceHistoryResponse struct {
 }
 
 // ListInstanceTypes lists all available instance types
-func (c *InstanceTypes) ListInstanceTypes(ctx context.Context) ([]*InstanceTypeResponse, error) {
+func (c *InstanceTypes) ListInstanceTypes() ([]*InstanceTypeResponse, error) {
 	op := &request.Operation{
 		Name:       "ListInstanceTypes",
 		HTTPMethod: "GET",
@@ -76,22 +73,13 @@ func (c *InstanceTypes) ListInstanceTypes(ctx context.Context) ([]*InstanceTypeR
 	}
 
 	var instanceTypes []*InstanceTypeResponse
-	req := c.NewRequest(op, nil, &instanceTypes)
-	req.SetContext(ctx)
+	req := c.newRequest(op, nil, &instanceTypes)
 
-	// Log the request URL
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return nil, err
-	}
-
-	return instanceTypes, nil
+	return instanceTypes, req.Send()
 }
 
 // GetInstanceTypePriceHistory gets the price history for instance types
-func (c *InstanceTypes) GetInstanceTypePriceHistory(ctx context.Context) (*PriceHistoryResponse, error) {
+func (c *InstanceTypes) GetInstanceTypePriceHistory() (*PriceHistoryResponse, error) {
 	op := &request.Operation{
 		Name:       "GetInstanceTypePriceHistory",
 		HTTPMethod: "GET",
@@ -99,16 +87,7 @@ func (c *InstanceTypes) GetInstanceTypePriceHistory(ctx context.Context) (*Price
 	}
 
 	var priceHistory PriceHistoryResponse
-	req := c.NewRequest(op, nil, &priceHistory)
-	req.SetContext(ctx)
+	req := c.newRequest(op, nil, &priceHistory)
 
-	// Log the request URL
-	log.Printf("Sending request to: %s", req.HTTPRequest.URL.String())
-
-	// Use the client's Send method which handles all the request/response lifecycle
-	if err := req.Send(); err != nil {
-		return nil, err
-	}
-
-	return &priceHistory, nil
+	return &priceHistory, req.Send()
 }
