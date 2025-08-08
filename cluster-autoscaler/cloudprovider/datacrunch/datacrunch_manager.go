@@ -69,6 +69,7 @@ func createDatacrunchManager(cloudReader io.Reader) (*DatacrunchManager, error) 
 		instance.New(sdkProvider.session),
 		instancetypes.New(sdkProvider.session),
 		startscripts.New(sdkProvider.session),
+		newCustomInstanceAvailability(sdkProvider.session),
 	}
 
 	manager := &DatacrunchManager{
@@ -122,34 +123,34 @@ func (m *DatacrunchManager) GetAsgSize(asg *Asg) (int64, error) {
 	return int64(len(instances)), nil
 }
 
-// SetAsgSize sets desired group size by creating or deleting instances.
-func (m *DatacrunchManager) SetAsgSize(asg *Asg, size int64) error {
-	if asg == nil {
-		return nil
-	}
-	if size < 0 {
-		return errors.New("size must be non-negative")
-	}
+// // SetAsgSize sets desired group size by creating or deleting instances.
+// func (m *DatacrunchManager) SetAsgSize(asg *Asg, size int64) error {
+// 	if asg == nil {
+// 		return nil
+// 	}
+// 	if size < 0 {
+// 		return errors.New("size must be non-negative")
+// 	}
 
-	// Get current size
-	currentSize, err := m.GetAsgSize(asg)
-	if err != nil {
-		return fmt.Errorf("failed to get current ASG size: %v", err)
-	}
+// 	// Get current size
+// 	currentSize, err := m.GetAsgSize(asg)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to get current ASG size: %v", err)
+// 	}
 
-	if currentSize == size {
-		// Already at desired size
-		return nil
-	}
+// 	if currentSize == size {
+// 		// Already at desired size
+// 		return nil
+// 	}
 
-	if size > currentSize {
-		// Scale up: create new instances
-		return m.scaleUpAsg(asg, int(size-currentSize))
-	} else {
-		// Scale down: delete instances
-		return m.scaleDownAsg(asg, int(currentSize-size))
-	}
-}
+// 	if size > currentSize {
+// 		// Scale up: create new instances
+// 		return m.scaleUpAsg(asg, int(size-currentSize))
+// 	} else {
+// 		// Scale down: delete instances
+// 		return m.scaleDownAsg(asg, int(currentSize-size))
+// 	}
+// }
 
 // GetAsgNodes returns node provider IDs for instances in the ASG
 func (m *DatacrunchManager) GetAsgNodes(asg *Asg) ([]string, error) {
@@ -273,101 +274,101 @@ func (m *DatacrunchManager) buildNodeFromTemplate(asg *Asg, template *asgTemplat
 	return node, nil
 }
 
-// scaleUpAsg creates new instances for the ASG
-func (m *DatacrunchManager) scaleUpAsg(asg *Asg, count int) error {
-	if count <= 0 {
-		return nil
-	}
+// // scaleUpAsg creates new instances for the ASG
+// func (m *DatacrunchManager) scaleUpAsg(asg *Asg, count int) error {
+// 	if count <= 0 {
+// 		return nil
+// 	}
 
-	klog.V(2).Infof("Scaling up ASG %s by %d instances", asg.id, count)
+// 	klog.V(2).Infof("Scaling up ASG %s by %d instances", asg.id, count)
 
-	// Get node configuration for this ASG
-	nodeConfig, err := m.getNodeConfigForAsg(asg)
-	if err != nil {
-		return fmt.Errorf("failed to get node config for ASG %s: %v", asg.id, err)
-	}
+// 	// Get node configuration for this ASG
+// 	nodeConfig, err := m.getNodeConfigForAsg(asg)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to get node config for ASG %s: %v", asg.id, err)
+// 	}
 
-	// Validate we don't exceed max size
-	currentSize, err := m.GetAsgSize(asg)
-	if err != nil {
-		return fmt.Errorf("failed to get current ASG size: %v", err)
-	}
+// 	// Validate we don't exceed max size
+// 	currentSize, err := m.GetAsgSize(asg)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to get current ASG size: %v", err)
+// 	}
 
-	if int(currentSize)+count > asg.maxSize {
-		return fmt.Errorf("scaling up by %d would exceed max size %d (current: %d)",
-			count, asg.maxSize, currentSize)
-	}
+// 	if int(currentSize)+count > asg.maxSize {
+// 		return fmt.Errorf("scaling up by %d would exceed max size %d (current: %d)",
+// 			count, asg.maxSize, currentSize)
+// 	}
 
-	// Create instances one by one
-	createdInstances := make([]string, 0, count)
-	for i := 0; i < count; i++ {
-		instanceID, err := m.createInstanceForAsg(asg, nodeConfig, i)
-		if err != nil {
-			klog.Errorf("Failed to create instance %d for ASG %s: %v", i, asg.id, err)
-			// Clean up any instances we've already created on failure
-			m.cleanupCreatedInstances(createdInstances)
-			return fmt.Errorf("failed to create instance %d: %v", i, err)
-		}
-		createdInstances = append(createdInstances, instanceID)
-		klog.V(3).Infof("Successfully created instance %s for ASG %s", instanceID, asg.id)
-	}
+// 	// Create instances one by one
+// 	createdInstances := make([]string, 0, count)
+// 	for i := 0; i < count; i++ {
+// 		instanceID, err := m.createInstanceForAsg(asg, nodeConfig, i)
+// 		if err != nil {
+// 			klog.Errorf("Failed to create instance %d for ASG %s: %v", i, asg.id, err)
+// 			// Clean up any instances we've already created on failure
+// 			m.cleanupCreatedInstances(createdInstances)
+// 			return fmt.Errorf("failed to create instance %d: %v", i, err)
+// 		}
+// 		createdInstances = append(createdInstances, instanceID)
+// 		klog.V(3).Infof("Successfully created instance %s for ASG %s", instanceID, asg.id)
+// 	}
 
-	klog.V(2).Infof("Successfully scaled up ASG %s by %d instances", asg.id, count)
-	return nil
-}
+// 	klog.V(2).Infof("Successfully scaled up ASG %s by %d instances", asg.id, count)
+// 	return nil
+// }
 
 // scaleDownAsg deletes instances from the ASG
-func (m *DatacrunchManager) scaleDownAsg(asg *Asg, count int) error {
-	if count <= 0 {
-		return nil
-	}
+// func (m *DatacrunchManager) scaleDownAsg(asg *Asg, count int) error {
+// 	if count <= 0 {
+// 		return nil
+// 	}
 
-	klog.V(2).Infof("Scaling down ASG %s by %d instances", asg.id, count)
+// 	klog.V(2).Infof("Scaling down ASG %s by %d instances", asg.id, count)
 
-	// Get current instances
-	instances, err := m.allInstances(asg.id)
-	if err != nil {
-		return fmt.Errorf("failed to get instances for ASG %s: %v", asg.id, err)
-	}
+// 	// Get current instances
+// 	instances, err := m.allInstances(asg.id)
+// 	if err != nil {
+// 		return fmt.Errorf("failed to get instances for ASG %s: %v", asg.id, err)
+// 	}
 
-	if len(instances) < count {
-		return fmt.Errorf("cannot delete %d instances, only %d available", count, len(instances))
-	}
+// 	if len(instances) < count {
+// 		return fmt.Errorf("cannot delete %d instances, only %d available", count, len(instances))
+// 	}
 
-	// Validate we don't go below min size
-	if len(instances)-count < asg.minSize {
-		return fmt.Errorf("scaling down by %d would go below min size %d (current: %d)",
-			count, asg.minSize, len(instances))
-	}
+// 	// Validate we don't go below min size
+// 	if len(instances)-count < asg.minSize {
+// 		return fmt.Errorf("scaling down by %d would go below min size %d (current: %d)",
+// 			count, asg.minSize, len(instances))
+// 	}
 
-	// Delete the requested number of instances
-	deletedCount := 0
-	for i := 0; i < count && i < len(instances); i++ {
-		instanceID := instances[i].ID
-		err := m.dcService.PerformInstanceAction(&instance.InstanceActionInput{
-			Action: instance.InstanceActionDelete,
-			ID:     instanceID,
-		})
-		if err != nil {
-			klog.Errorf("Failed to delete instance %s from ASG %s: %v", instanceID, asg.id, err)
-			// Continue trying to delete other instances rather than failing completely
-			continue
-		}
-		deletedCount++
-		klog.V(3).Infof("Successfully deleted instance %s from ASG %s", instanceID, asg.id)
-	}
+// 	// Delete the requested number of instances
+// 	deletedCount := 0
+// 	for i := 0; i < count && i < len(instances); i++ {
+// 		instanceID := instances[i].ID
+// 		err := m.dcService.PerformInstanceAction(&instance.InstanceActionInput{
+// 			Action: instance.InstanceActionDelete,
+// 			ID:     instanceID,
+// 		})
+// 		if err != nil {
+// 			klog.Errorf("Failed to delete instance %s from ASG %s: %v", instanceID, asg.id, err)
+// 			// Continue trying to delete other instances rather than failing completely
+// 			continue
+// 		}
+// 		deletedCount++
+// 		klog.V(3).Infof("Successfully deleted instance %s from ASG %s", instanceID, asg.id)
+// 	}
 
-	if deletedCount == 0 {
-		return fmt.Errorf("failed to delete any instances from ASG %s", asg.id)
-	}
+// 	if deletedCount == 0 {
+// 		return fmt.Errorf("failed to delete any instances from ASG %s", asg.id)
+// 	}
 
-	if deletedCount < count {
-		klog.Warningf("Only deleted %d out of %d requested instances from ASG %s", deletedCount, count, asg.id)
-	}
+// 	if deletedCount < count {
+// 		klog.Warningf("Only deleted %d out of %d requested instances from ASG %s", deletedCount, count, asg.id)
+// 	}
 
-	klog.V(2).Infof("Successfully scaled down ASG %s by %d instances", asg.id, deletedCount)
-	return nil
-}
+// 	klog.V(2).Infof("Successfully scaled down ASG %s by %d instances", asg.id, deletedCount)
+// 	return nil
+// }
 
 // getNodeConfigForAsg retrieves the node configuration for an ASG using global config
 func (m *DatacrunchManager) getNodeConfigForAsg(asg *Asg) (*nodeConfig, error) {
@@ -434,8 +435,8 @@ func (m *DatacrunchManager) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 	input := &instance.CreateInstanceInput{
 		InstanceType:    asg.instanceType,
 		Image:           image,
-		SSHKeyIDs:       nodeConfig.SSHKeyIDs,         // Required
-		StartupScriptID: startupScriptID,              // Required - now properly created
+		SSHKeyIDs:       nodeConfig.SSHKeyIDs, // Required
+		StartupScriptID: startupScriptID,      // Required - now properly created
 		Hostname:        hostname,
 		Description:     asg.id, // Use ASG ID as description for grouping
 		LocationCode:    asg.locationCode,
@@ -464,9 +465,9 @@ func (m *DatacrunchManager) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 	}
 
 	// Create the instance
-	klog.V(3).Infof("Creating instance %s with type %s, image %s, contract %s, pricing %s", 
+	klog.V(3).Infof("Creating instance %s with type %s, image %s, contract %s, pricing %s",
 		hostname, asg.instanceType, image, m.cfg.BillingConfig.Contract, m.cfg.BillingConfig.Price)
-	
+
 	instanceID, err := m.dcService.CreateInstance(input)
 	if err != nil {
 		return "", fmt.Errorf("failed to create instance: %v", err)
@@ -480,7 +481,7 @@ func isGPUInstanceType(instanceType string) bool {
 	// Common GPU instance type patterns
 	gpuPatterns := []string{"L40S", "A40", "A6000", "V100", "T4", "RTX", "gpu", "GPU"}
 	instanceTypeUpper := strings.ToUpper(instanceType)
-	
+
 	for _, pattern := range gpuPatterns {
 		if strings.Contains(instanceTypeUpper, strings.ToUpper(pattern)) {
 			return true
@@ -492,20 +493,20 @@ func isGPUInstanceType(instanceType string) bool {
 // createOrGetStartupScript creates a startup script or returns existing ID if already created
 func (m *DatacrunchManager) createOrGetStartupScript(asg *Asg, nodeConfig *nodeConfig) (string, error) {
 	scriptName := fmt.Sprintf("autoscaler-%s", asg.id)
-	
+
 	// Try to find existing script first
 	scripts, err := m.dcService.ListStartScripts()
 	if err != nil {
 		return "", fmt.Errorf("failed to list startup scripts: %v", err)
 	}
-	
+
 	for _, script := range scripts {
 		if script.Name == scriptName {
 			klog.V(3).Infof("Found existing startup script %s with ID %s", scriptName, script.ID)
 			return script.ID, nil
 		}
 	}
-	
+
 	// Create new startup script
 	klog.V(3).Infof("Creating new startup script %s", scriptName)
 	scriptID, err := m.dcService.CreateStartScript(&startscripts.CreateStartScriptInput{
@@ -515,7 +516,7 @@ func (m *DatacrunchManager) createOrGetStartupScript(asg *Asg, nodeConfig *nodeC
 	if err != nil {
 		return "", fmt.Errorf("failed to create startup script: %v", err)
 	}
-	
+
 	klog.V(3).Infof("Created startup script %s with ID %s", scriptName, scriptID)
 	return scriptID, nil
 }
@@ -533,4 +534,8 @@ func (m *DatacrunchManager) cleanupCreatedInstances(instanceIDs []string) {
 			klog.V(3).Infof("Cleaned up instance %s", instanceID)
 		}
 	}
+}
+
+func (m *DatacrunchManager) instanceTypeAvailable(instanceType string, locationCode string) (bool, error) {
+	return m.dcService.CheckInstanceAvailability(instanceType, locationCode)
 }

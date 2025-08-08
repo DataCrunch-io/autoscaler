@@ -32,11 +32,6 @@ func (e *EnvProvider) Retrieve() (Value, error) {
 		clientSecret = os.Getenv("DATACRUNCH_SECRET_ACCESS_KEY")
 	}
 
-	// Set default base URL if not provided
-	if baseURL == "" {
-		baseURL = "https://api.datacrunch.io"
-	}
-
 	if clientID == "" {
 		return Value{ProviderName: EnvProviderName}, ErrAccessKeyIDNotFound
 	}

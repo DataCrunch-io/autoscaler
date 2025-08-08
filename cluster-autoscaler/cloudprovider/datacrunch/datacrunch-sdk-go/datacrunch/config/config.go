@@ -1,4 +1,4 @@
-package datacrunch
+package config
 
 import (
 	"time"
@@ -6,66 +6,86 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/credentials"
 )
 
-// ClientConfig holds optional configuration for the DataCrunch SDK
-type ClientConfig struct {
-	// Optional timeout override
+// Config holds configuration for the DataCrunch SDK
+type Config struct {
+	// API configuration
+	BaseURL *string
 	Timeout *time.Duration
 
-	// Optional base URL override
-	BaseURL *string
-
-	// Optional credentials (for static credential use cases)
+	// Credential configuration
 	Credentials *credentials.Credentials
 
-	// Optional retry configuration
+	// Retry configuration
 	MaxRetries *int
 	Retryer    interface{}
 }
 
 // Option is a functional option for configuring the DataCrunch client
-type Option func(*ClientConfig)
+type Option func(*Config)
+
+// Copy creates a copy of the Config
+func (c *Config) Copy(cfgs ...*Config) *Config {
+	newConfig := &Config{
+		BaseURL:     c.BaseURL,
+		Timeout:     c.Timeout,
+		Credentials: c.Credentials,
+		MaxRetries:  c.MaxRetries,
+		Retryer:     c.Retryer,
+	}
+
+	for _, cfg := range cfgs {
+		if cfg.BaseURL != nil {
+			newConfig.BaseURL = cfg.BaseURL
+		}
+	}
+
+	return newConfig
+}
 
 // WithBaseURL sets the base URL for the API
 func WithBaseURL(baseURL string) Option {
-	return func(c *ClientConfig) {
+	return func(c *Config) {
 		c.BaseURL = &baseURL
 	}
 }
 
 // WithCredentials sets static OAuth2 client credentials
 func WithCredentials(clientID, clientSecret string) Option {
-	return func(c *ClientConfig) {
-		c.Credentials = credentials.NewStaticCredentials(clientID, clientSecret, *c.BaseURL)
+	return func(c *Config) {
+		// Note: We need to handle baseURL properly here
+		baseURL := "https://api.datacrunch.io/v1"
+		if c.BaseURL != nil {
+			baseURL = *c.BaseURL
+		}
+		c.Credentials = credentials.NewStaticCredentials(clientID, clientSecret, baseURL)
 	}
 }
 
 // WithTimeout sets the HTTP client timeout
 func WithTimeout(timeout time.Duration) Option {
-	return func(c *ClientConfig) {
+	return func(c *Config) {
 		c.Timeout = &timeout
 	}
 }
 
 // WithCredentialsProvider sets custom credentials provider
 func WithCredentialsProvider(creds *credentials.Credentials) Option {
-	return func(c *ClientConfig) {
+	return func(c *Config) {
 		c.Credentials = creds
 	}
 }
 
-// Legacy support - these methods maintain backward compatibility
-
-// WithRetryConfig configures retry behavior (supported again)
+// WithRetryConfig configures retry behavior
 func WithRetryConfig(maxRetries int, retryDelay, maxRetryDelay time.Duration) Option {
-	return func(c *ClientConfig) {
+	return func(c *Config) {
 		c.MaxRetries = &maxRetries
 		// Custom retry delays require custom retryer - use WithRetryer for that
 	}
 }
 
-// WithRetryer sets a custom retryer implementation (supported again)
+// WithRetryer sets a custom retryer implementation
 func WithRetryer(retryer interface{}) Option {
-	return func(c *ClientConfig) {
+	return func(c *Config) {
 		c.Retryer = retryer
 	}
 }

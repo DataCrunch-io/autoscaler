@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client/metadata"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/config"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
 )
 
@@ -23,18 +24,16 @@ type ResponseInterface interface {
 
 // A Config provides configuration to a service client instance.
 type Config struct {
-	BaseURL      string
-	ClientID     string
-	ClientSecret string
-	Timeout      time.Duration
-	MaxRetries   *int
-	Retryer      interface{}
+	Config   config.Config
+	BaseURL  string
+	Handlers request.Handlers
+	Timeout  time.Duration
 }
 
 // ConfigProvider provides a generic way for a service client to receive
 // the ClientConfig without circular dependencies.
 type ConfigProvider interface {
-	ClientConfig(serviceName string, cfgs ...*interface{}) Config
+	ClientConfig(serviceName string, cfgs ...*config.Config) Config
 }
 
 // ConfigNoResolveEndpointProvider same as ConfigProvider except it will not
@@ -50,12 +49,12 @@ type Client struct {
 	request.Retryer
 	metadata.ClientInfo
 
-	Config   interface{}
+	Config   config.Config
 	Handlers request.Handlers
 }
 
 // New will return a pointer to a new initialized service client.
-func New(cfg interface{}, info metadata.ClientInfo, handlers request.Handlers, options ...func(*Client)) *Client {
+func New(cfg config.Config, info metadata.ClientInfo, handlers request.Handlers, options ...func(*Client)) *Client {
 	svc := &Client{
 		Config:     cfg,
 		ClientInfo: info,
@@ -63,23 +62,18 @@ func New(cfg interface{}, info metadata.ClientInfo, handlers request.Handlers, o
 	}
 
 	// Configure retryer - always provide sensible defaults
-	if config, ok := cfg.(*Config); ok {
-		switch retryer, ok := config.Retryer.(request.Retryer); {
-		case ok:
-			// User provided custom retryer
-			svc.Retryer = retryer
-		default:
-			// Use DefaultRetryer with proper defaults
-			maxRetries := DefaultRetryerMaxNumRetries // Default to 3 retries
-			if config.MaxRetries != nil {
-				maxRetries = *config.MaxRetries
-			}
-			// Create retryer with sensible defaults for all timing values
-			svc.Retryer = NewDefaultRetryer(maxRetries)
+	switch retryer, ok := cfg.Retryer.(request.Retryer); {
+	case ok:
+		// User provided custom retryer
+		svc.Retryer = retryer
+	default:
+		// Use DefaultRetryer with proper defaults
+		maxRetries := DefaultRetryerMaxNumRetries // Default to 3 retries
+		if cfg.MaxRetries != nil {
+			maxRetries = *cfg.MaxRetries
 		}
-	} else {
-		// Fallback when config type is unknown - still provide good defaults
-		svc.Retryer = NewDefaultRetryer(DefaultRetryerMaxNumRetries)
+		// Create retryer with sensible defaults for all timing values
+		svc.Retryer = NewDefaultRetryer(maxRetries)
 	}
 
 	for _, option := range options {

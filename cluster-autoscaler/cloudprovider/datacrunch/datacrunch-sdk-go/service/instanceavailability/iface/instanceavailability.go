@@ -8,7 +8,7 @@ import (
 // instance-availability service client's API operation.
 type InstanceAvailabilityAPI interface {
 	ListInstanceAvailability() ([]*instanceavailability.InstanceAvailabilityResponse, error)
-	CheckInstanceAvailability(instanceType string) (bool, error)
+	// CheckInstanceAvailability(instanceType string) (bool, error)
 }
 
 var _ InstanceAvailabilityAPI = (*instanceavailability.InstanceAvailability)(nil)

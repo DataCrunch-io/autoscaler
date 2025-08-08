@@ -2,6 +2,7 @@ package auth
 
 import (
 	"log"
+	"reflect"
 
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/credentials"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/dcerr"
@@ -10,8 +11,6 @@ import (
 
 // OAuth2AuthHandler adds OAuth2 authentication to requests using credential chain
 func OAuth2AuthHandler(r *request.Request) {
-	log.Printf("Starting OAuth2 authentication with credential chain")
-
 	// Get credentials from the request's session
 	var creds *credentials.Credentials
 	var err error
@@ -19,10 +18,8 @@ func OAuth2AuthHandler(r *request.Request) {
 	// Try to extract credentials from different sources
 	if sessionCreds := getCredentialsFromRequest(r); sessionCreds != nil {
 		creds = sessionCreds
-		log.Printf("Using session credentials")
 	} else {
 		// Fallback to creating OAuth2 credentials from config
-		log.Printf("Falling back to config-based credentials")
 		if err = r.Error; err != nil {
 			return
 		}
@@ -37,26 +34,21 @@ func OAuth2AuthHandler(r *request.Request) {
 		// Get token from OAuth2 wrapper
 		token, err := oauth2Creds.GetToken(r.Context())
 		if err != nil {
-			log.Printf("Failed to get token from OAuth2 credentials: %v", err)
 			r.Error = err
 			return
 		}
 
 		// Add the Authorization header
 		r.HTTPRequest.Header.Set("Authorization", "Bearer "+token)
-		log.Printf("Added Authorization header from OAuth2 credentials")
 		return
 	}
 
-	// Get credential values from chain
-	credValue, err := creds.GetWithContext(r.Context())
-	if err != nil {
-		log.Printf("Failed to get credentials: %v", err)
-		r.Error = err
-		return
-	}
-
-	log.Printf("Got credentials from provider: %s", credValue.ProviderName)
+	// // Get credential values from chain
+	// _, err = creds.GetWithContext(r.Context())
+	// if err != nil {
+	// 	r.Error = err
+	// 	return
+	// }
 
 	// Create OAuth2Credentials wrapper for token management
 	oauth2Creds := credentials.NewOAuth2CredentialsFromProvider(creds)
@@ -73,7 +65,6 @@ func OAuth2AuthHandler(r *request.Request) {
 
 	// Add the Authorization header
 	r.HTTPRequest.Header.Set("Authorization", "Bearer "+token)
-	log.Printf("Added Authorization header")
 }
 
 // SessionWithCredentials defines an interface for session-like objects with credentials
@@ -88,6 +79,21 @@ func getCredentialsFromRequest(r *request.Request) *credentials.Credentials {
 	case SessionWithCredentials:
 		return cfg.GetCredentials()
 	default:
+		// Try to extract from config.Config struct using reflection
+		if cfgValue := reflect.ValueOf(r.Config); cfgValue.IsValid() {
+			// Handle both struct and pointer to struct
+			if cfgValue.Kind() == reflect.Ptr && !cfgValue.IsNil() {
+				cfgValue = cfgValue.Elem()
+			}
+			if cfgValue.Kind() == reflect.Struct {
+				// Check for Credentials field in config
+				if field := cfgValue.FieldByName("Credentials"); field.IsValid() && !field.IsNil() {
+					if creds, ok := field.Interface().(*credentials.Credentials); ok {
+						return creds
+					}
+				}
+			}
+		}
 		return nil
 	}
 }

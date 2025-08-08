@@ -151,10 +151,5 @@ func (s *SharedCredentialsProvider) loadCredentials(filename, profile string) (V
 		return Value{}, fmt.Errorf("profile %s not found or missing required credentials in %s", profile, filename)
 	}
 
-	// Set default base URL if not provided
-	if creds.BaseURL == "" {
-		creds.BaseURL = "https://api.datacrunch.io"
-	}
-
 	return creds, nil
 }

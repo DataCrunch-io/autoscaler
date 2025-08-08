@@ -1,6 +1,7 @@
 package datacrunch
 
 import (
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/config"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/credentials"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/session"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/instance"
@@ -29,6 +30,12 @@ type Client struct {
 	VolumeTypes          *volumetypes.VolumeTypes
 }
 
+// Config represents the configuration for the DataCrunch SDK
+type Config = config.Config
+
+// Option is a functional option for configuring the DataCrunch client
+type Option = config.Option
+
 // Session represents a shared configuration and state for service clients
 type Session = *session.Session
 
@@ -42,34 +49,34 @@ type Session = *session.Session
 //	client := datacrunch.New() // Uses credential chain automatically
 //	client := datacrunch.New(datacrunch.WithCredentials("id", "secret"))
 func New(options ...Option) *Client {
-	config := &ClientConfig{}
+	cfg := &Config{}
 
 	// Apply all options
 	for _, option := range options {
-		option(config)
+		option(cfg)
 	}
 
 	// Build session options
 	var sessionOpts []func(*session.Options)
 
-	if config.Timeout != nil {
-		sessionOpts = append(sessionOpts, session.WithTimeout(*config.Timeout))
+	if cfg.Timeout != nil {
+		sessionOpts = append(sessionOpts, session.WithTimeout(*cfg.Timeout))
 	}
 
-	if config.BaseURL != nil {
-		sessionOpts = append(sessionOpts, session.WithBaseURL(*config.BaseURL))
+	if cfg.BaseURL != nil {
+		sessionOpts = append(sessionOpts, session.WithBaseURL(*cfg.BaseURL))
 	}
 
-	if config.Credentials != nil {
-		sessionOpts = append(sessionOpts, session.WithCredentialsProvider(config.Credentials))
+	if cfg.Credentials != nil {
+		sessionOpts = append(sessionOpts, session.WithCredentialsProvider(cfg.Credentials))
 	}
 
-	if config.MaxRetries != nil {
-		sessionOpts = append(sessionOpts, session.WithMaxRetries(*config.MaxRetries))
+	if cfg.MaxRetries != nil {
+		sessionOpts = append(sessionOpts, session.WithMaxRetries(*cfg.MaxRetries))
 	}
 
-	if config.Retryer != nil {
-		sessionOpts = append(sessionOpts, session.WithRetryer(config.Retryer))
+	if cfg.Retryer != nil {
+		sessionOpts = append(sessionOpts, session.WithRetryer(cfg.Retryer))
 	}
 
 	// Create session (uses credential chain by default)
@@ -99,11 +106,11 @@ func New(options ...Option) *Client {
 // - DATACRUNCH_BASE_URL (API base URL, optional)
 // - DATACRUNCH_TIMEOUT (request timeout, optional)
 func NewFromEnv(options ...Option) *Client {
-	config := &ClientConfig{}
+	cfg := &Config{}
 
 	// Apply additional options (these can override defaults)
 	for _, option := range options {
-		option(config)
+		option(cfg)
 	}
 
 	// Build session options, start with env credentials
@@ -111,12 +118,12 @@ func NewFromEnv(options ...Option) *Client {
 		session.WithCredentialsProvider(credentials.NewEnvCredentials()),
 	}
 
-	if config.Timeout != nil {
-		sessionOpts = append(sessionOpts, session.WithTimeout(*config.Timeout))
+	if cfg.Timeout != nil {
+		sessionOpts = append(sessionOpts, session.WithTimeout(*cfg.Timeout))
 	}
 
-	if config.BaseURL != nil {
-		sessionOpts = append(sessionOpts, session.WithBaseURL(*config.BaseURL))
+	if cfg.BaseURL != nil {
+		sessionOpts = append(sessionOpts, session.WithBaseURL(*cfg.BaseURL))
 	}
 
 	// Create session with environment credentials
@@ -183,3 +190,26 @@ func NewWithSession(sess Session) *Client {
 		VolumeTypes:          volumetypes.New(sess),
 	}
 }
+
+// Re-export config options for backward compatibility
+
+// WithBaseURL sets the base URL for the API
+var WithBaseURL = config.WithBaseURL
+
+// WithCredentials sets static OAuth2 client credentials
+var WithCredentials = config.WithCredentials
+
+// WithTimeout sets the HTTP client timeout
+var WithTimeout = config.WithTimeout
+
+// WithCredentialsProvider sets custom credentials provider
+var WithCredentialsProvider = config.WithCredentialsProvider
+
+// WithRetryConfig configures retry behavior
+var WithRetryConfig = config.WithRetryConfig
+
+// WithRetryer sets a custom retryer implementation
+var WithRetryer = config.WithRetryer
+
+// WithNoRetries disables retry functionality entirely
+var WithNoRetries = config.WithNoRetries

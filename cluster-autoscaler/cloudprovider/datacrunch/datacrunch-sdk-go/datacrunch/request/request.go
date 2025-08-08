@@ -85,7 +85,7 @@ func New(cfg interface{}, handlers Handlers, retryer Retryer, operation *Operati
 	httpReq, _ := http.NewRequest(method, "", nil)
 
 	// Extract BaseURL from config
-	baseURL := "https://api.datacrunch.io/v1" // default fallback value
+	baseURL := "https://api.datacrunch.io/v1"
 
 	// Try different config types
 	switch config := cfg.(type) {
@@ -103,9 +103,36 @@ func New(cfg interface{}, handlers Handlers, retryer Retryer, operation *Operati
 				cfgValue = cfgValue.Elem()
 			}
 			if cfgValue.Kind() == reflect.Struct {
-				if field := cfgValue.FieldByName("BaseURL"); field.IsValid() && field.Kind() == reflect.String {
-					if urlStr := field.String(); urlStr != "" {
-						baseURL = urlStr
+				// Check for direct BaseURL field
+				if field := cfgValue.FieldByName("BaseURL"); field.IsValid() {
+					if field.Kind() == reflect.String {
+						if urlStr := field.String(); urlStr != "" {
+							baseURL = urlStr
+						}
+					} else if field.Kind() == reflect.Ptr && !field.IsNil() && field.Elem().Kind() == reflect.String {
+						// Handle *string (pointer to string)
+						if urlStr := field.Elem().String(); urlStr != "" {
+							baseURL = urlStr
+						}
+					}
+				} else {
+					// Check for Config.BaseURL pattern (for sessions)
+					if configField := cfgValue.FieldByName("Config"); configField.IsValid() {
+						if configField.Kind() == reflect.Ptr && !configField.IsNil() {
+							configValue := configField.Elem()
+							if baseURLField := configValue.FieldByName("BaseURL"); baseURLField.IsValid() {
+								if baseURLField.Kind() == reflect.String {
+									if urlStr := baseURLField.String(); urlStr != "" {
+										baseURL = urlStr
+									}
+								} else if baseURLField.Kind() == reflect.Ptr && !baseURLField.IsNil() && baseURLField.Elem().Kind() == reflect.String {
+									// Handle *string (pointer to string)
+									if urlStr := baseURLField.Elem().String(); urlStr != "" {
+										baseURL = urlStr
+									}
+								}
+							}
+						}
 					}
 				}
 			}
@@ -143,6 +170,7 @@ func New(cfg interface{}, handlers Handlers, retryer Retryer, operation *Operati
 		HTTPResponse: nil,
 		Body:         nil,
 		Params:       params,
+		Data:         data,
 		Error:        err,
 		RetryCount:   0,
 		Retryable:    nil,
@@ -200,7 +228,30 @@ func (r *Request) SetContext(ctx context.Context) {
 // ParamsFilled returns if the request's parameters have been populated
 // and the parameters are valid.
 func (r *Request) ParamsFilled() bool {
-	return r.Params != nil && reflect.ValueOf(r.Params).Elem().IsValid()
+	if r.Params == nil {
+		return false
+	}
+
+	value := reflect.ValueOf(r.Params)
+	if !value.IsValid() {
+		return false
+	}
+
+	// Handle different parameter types
+	switch value.Kind() {
+	case reflect.Ptr:
+		// For pointers, check if the element is valid
+		return !value.IsNil() && value.Elem().IsValid()
+	case reflect.Map:
+		// For maps, check if it's not nil and has entries
+		return !value.IsNil() && value.Len() > 0
+	case reflect.Slice, reflect.Array:
+		// For slices and arrays, check if not nil
+		return !value.IsNil()
+	default:
+		// For other types (structs, primitives), just check if valid
+		return true
+	}
 }
 
 // SetReaderBody sets the request's body reader.

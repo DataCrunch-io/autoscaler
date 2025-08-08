@@ -49,7 +49,12 @@ func UnmarshalMeta(r *request.Request) {
 // with any error unmarshaling the response into the target datatype.
 func UnmarshalResponse(resp *http.Response, data interface{}, lowerCaseHeaderMaps bool) error {
 	v := reflect.Indirect(reflect.ValueOf(data))
-	return unmarshalLocationElements(resp, v, lowerCaseHeaderMaps)
+	// Only unmarshal location elements for struct types
+	if v.Kind() == reflect.Struct {
+		return unmarshalLocationElements(resp, v, lowerCaseHeaderMaps)
+	}
+	// For non-struct types (like slices), there are no location elements to unmarshal
+	return nil
 }
 
 func unmarshalBody(r *request.Request, v reflect.Value) error {

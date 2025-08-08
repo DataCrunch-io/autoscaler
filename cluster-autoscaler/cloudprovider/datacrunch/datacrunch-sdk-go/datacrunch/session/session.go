@@ -1,10 +1,12 @@
 package session
 
 import (
+	"fmt"
 	"os"
 	"time"
 
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/config"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/credentials"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/defaults"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
@@ -12,7 +14,7 @@ import (
 
 // Session provides a shared configuration and state for service clients
 type Session struct {
-	Config      *client.Config
+	Config      *config.Config
 	Handlers    request.Handlers
 	Credentials *credentials.Credentials
 }
@@ -38,7 +40,7 @@ type Options struct {
 func DefaultOptions() *Options {
 	defaultMaxRetries := 3 // Provide good defaults for all users
 	return &Options{
-		BaseURL:    "https://api.datacrunch.io/v1",
+		BaseURL:    defaults.DefaultBaseURL,
 		Timeout:    30 * time.Second,
 		MaxRetries: &defaultMaxRetries, // Default to 3 retries for resilience
 	}
@@ -48,18 +50,8 @@ func DefaultOptions() *Options {
 func New(options ...func(*Options)) *Session {
 	opts := DefaultOptions()
 
-	// Apply all options
 	for _, option := range options {
 		option(opts)
-	}
-
-	config := &client.Config{
-		BaseURL:      opts.BaseURL,
-		ClientID:     opts.ClientID,
-		ClientSecret: opts.ClientSecret,
-		Timeout:      opts.Timeout,
-		MaxRetries:   opts.MaxRetries,
-		Retryer:      opts.Retryer,
 	}
 
 	// Setup credentials
@@ -74,42 +66,60 @@ func New(options ...func(*Options)) *Session {
 		creds = defaults.CredChain()
 	}
 
-	// If no explicit base URL was provided, try to get it from credentials
-	if opts.BaseURL == "https://api.datacrunch.io/v1" { // Only if using default
+	var finalBaseURL string
+
+	// Check if BaseURL was explicitly set (different from default)
+	if opts.BaseURL != "" && opts.BaseURL != defaults.DefaultBaseURL {
+		finalBaseURL = opts.BaseURL
+	} else {
+		// Determine BaseURL with correct priority: env > credential file > default
 		if credValue, err := creds.Get(); err == nil && credValue.BaseURL != "" {
-			config.BaseURL = credValue.BaseURL
+			finalBaseURL = credValue.BaseURL
 		}
 	}
 
+	cfg := &config.Config{
+		BaseURL:     &finalBaseURL,
+		Timeout:     &opts.Timeout,
+		MaxRetries:  opts.MaxRetries,
+		Retryer:     opts.Retryer,
+		Credentials: creds,
+	}
+
 	return &Session{
-		Config:      config,
+		Config:      cfg,
 		Handlers:    defaults.Handlers(),
 		Credentials: creds,
 	}
 }
 
-// NewFromEnv creates a new session using environment variables
+// NewFromEnv creates a new session using only environment variables
+// This function will panic if required environment variables are missing.
+// Use New() instead if you want fallback behavior to credential files.
 // Supported environment variables:
-// - DATACRUNCH_BASE_URL (default: https://api.datacrunch.io/v1)
+// - DATACRUNCH_BASE_URL (optional, defaults to https://api.datacrunch.io/v1)
 // - DATACRUNCH_CLIENT_ID (required)
 // - DATACRUNCH_CLIENT_SECRET (required)
-// - DATACRUNCH_TIMEOUT (default: 30s, format: "30s", "1m", etc.)
+// - DATACRUNCH_TIMEOUT (optional, default: 30s, format: "30s", "1m", etc.)
 func NewFromEnv(options ...func(*Options)) *Session {
+	// Only use EnvProvider - no fallback to other credential sources
+	envProvider := &credentials.EnvProvider{}
+	envCreds := credentials.NewCredentials(envProvider)
+
+	// Try to get credentials from environment - fail fast if missing required vars
+	credValue, err := envCreds.Get()
+	if err != nil {
+		panic(fmt.Sprintf("NewFromEnv requires environment variables but they are missing or invalid: %v. Required: DATACRUNCH_CLIENT_ID, DATACRUNCH_CLIENT_SECRET. Optional: DATACRUNCH_BASE_URL", err))
+	}
+
 	opts := DefaultOptions()
 
-	// Load from environment variables
-	if baseURL := os.Getenv("DATACRUNCH_BASE_URL"); baseURL != "" {
-		opts.BaseURL = baseURL
-	}
+	// Use values from environment
+	opts.BaseURL = credValue.BaseURL
+	opts.ClientID = credValue.ClientID
+	opts.ClientSecret = credValue.ClientSecret
 
-	if clientID := os.Getenv("DATACRUNCH_CLIENT_ID"); clientID != "" {
-		opts.ClientID = clientID
-	}
-
-	if clientSecret := os.Getenv("DATACRUNCH_CLIENT_SECRET"); clientSecret != "" {
-		opts.ClientSecret = clientSecret
-	}
-
+	// Handle optional DATACRUNCH_TIMEOUT env var
 	if timeoutStr := os.Getenv("DATACRUNCH_TIMEOUT"); timeoutStr != "" {
 		if timeout, err := time.ParseDuration(timeoutStr); err == nil {
 			opts.Timeout = timeout
@@ -121,38 +131,19 @@ func NewFromEnv(options ...func(*Options)) *Session {
 		option(opts)
 	}
 
-	config := &client.Config{
-		BaseURL:      opts.BaseURL,
-		ClientID:     opts.ClientID,
-		ClientSecret: opts.ClientSecret,
-		Timeout:      opts.Timeout,
-		MaxRetries:   opts.MaxRetries,
-		Retryer:      opts.Retryer,
-	}
-
-	// Setup credentials
-	var creds *credentials.Credentials
-	if opts.Credentials != nil {
-		creds = opts.Credentials
-	} else if opts.ClientID != "" && opts.ClientSecret != "" {
-		// Use static credentials if provided directly
-		creds = credentials.NewStaticCredentials(opts.ClientID, opts.ClientSecret, opts.BaseURL)
-	} else {
-		// Use default credential chain
-		creds = defaults.CredChain()
-	}
-
-	// If no explicit base URL was provided, try to get it from credentials
-	if opts.BaseURL == "https://api.datacrunch.io/v1" { // Only if using default
-		if credValue, err := creds.Get(); err == nil && credValue.BaseURL != "" {
-			config.BaseURL = credValue.BaseURL
-		}
+	// Create session using the env-only credentials
+	cfg := &config.Config{
+		BaseURL:     &opts.BaseURL,
+		Timeout:     &opts.Timeout,
+		MaxRetries:  opts.MaxRetries,
+		Retryer:     opts.Retryer,
+		Credentials: envCreds,
 	}
 
 	return &Session{
-		Config:      config,
+		Config:      cfg,
 		Handlers:    defaults.Handlers(),
-		Credentials: creds,
+		Credentials: envCreds,
 	}
 }
 
@@ -212,12 +203,31 @@ func WithCredentialChainVerboseErrors(verbose bool) func(*Options) {
 }
 
 // ClientConfig implements the client.ConfigProvider interface
-func (s *Session) ClientConfig(serviceName string, cfgs ...*interface{}) client.Config {
-	return *s.Config
+func (s *Session) ClientConfig(serviceName string, cfgs ...*config.Config) client.Config {
+	s = s.Copy(cfgs...)
+	return client.Config{
+		Config:   *s.Config,
+		BaseURL:  *s.Config.BaseURL,
+		Handlers: s.Handlers,
+	}
+}
+
+func (s *Session) Copy(cfgs ...*config.Config) *Session {
+	newSession := &Session{
+		Config:   s.Config.Copy(cfgs...),
+		Handlers: s.Handlers.Copy(),
+	}
+
+	initHandlers(newSession)
+
+	return newSession
+}
+
+func initHandlers(s *Session) {
 }
 
 // ClientConfigNoResolveEndpoint implements the client.ConfigNoResolveEndpointProvider interface
-func (s *Session) ClientConfigNoResolveEndpoint(cfgs ...*interface{}) client.Config {
+func (s *Session) ClientConfigNoResolveEndpoint(cfgs ...*interface{}) config.Config {
 	return *s.Config
 }
 

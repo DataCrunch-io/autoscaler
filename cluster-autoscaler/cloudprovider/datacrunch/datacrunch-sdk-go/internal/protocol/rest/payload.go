@@ -38,6 +38,11 @@ func PayloadType(i interface{}) string {
 		return ""
 	}
 
+	// Only check for payload fields if the type is a struct
+	if v.Kind() != reflect.Struct {
+		return ""
+	}
+
 	if field, ok := v.Type().FieldByName("_"); ok {
 		if noPayload := field.Tag.Get(nopayloadPayloadType); noPayload != "" {
 			return nopayloadPayloadType

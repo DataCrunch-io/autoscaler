@@ -186,6 +186,19 @@ func (u unmarshaler) unmarshalList(value reflect.Value, data interface{}, tag re
 		return fmt.Errorf("JSON value is not a list (%#v)", data)
 	}
 
+	// Handle pointer to slice
+	if value.Kind() == reflect.Ptr {
+		if value.IsNil() {
+			// Create new slice
+			sliceType := value.Type().Elem()
+			l := len(listData)
+			newSlice := reflect.MakeSlice(sliceType, l, l)
+			value.Set(reflect.New(sliceType))
+			value.Elem().Set(newSlice)
+		}
+		value = value.Elem()
+	}
+
 	if value.IsNil() {
 		l := len(listData)
 		value.Set(reflect.MakeSlice(value.Type(), l, l))
@@ -237,6 +250,8 @@ func (u unmarshaler) unmarshalScalar(value reflect.Value, data interface{}, tag 
 		switch value.Interface().(type) {
 		case *string:
 			value.Set(reflect.ValueOf(&d))
+		case string:
+			value.Set(reflect.ValueOf(d))
 		case []byte:
 			b, err := base64.StdEncoding.DecodeString(d)
 			if err != nil {
