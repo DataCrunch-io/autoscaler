@@ -1,17 +1,9 @@
 package sshkeys
 
 import (
-	"fmt"
-
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/internal/protocol/restjson"
 )
-
-// SSHKeyResponse represents an SSH key
-type SSHKeyResponse struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-	Key  string `json:"key"`
-}
 
 // CreateSSHKeyInput represents the input for creating a new SSH key
 type CreateSSHKeyInput struct {
@@ -22,6 +14,12 @@ type CreateSSHKeyInput struct {
 // DeleteSSHKeysInput represents the input for deleting multiple SSH keys
 type DeleteSSHKeysInput struct {
 	Keys []string `json:"keys"`
+}
+
+type SSHKeyResponse struct {
+	ID   string `json:"id"`
+	Name string `json:"name"`
+	Key  string `json:"key"`
 }
 
 // ListSSHKeys lists all SSH keys
@@ -38,32 +36,39 @@ func (c *SSHKey) ListSSHKeys() ([]*SSHKeyResponse, error) {
 	return sshKeys, req.Send()
 }
 
+type GetSSHKeyInput struct {
+	ID string `location:"uri" locationName:"id"`
+}
+
 // GetSSHKey gets a single SSH key by ID
-func (c *SSHKey) GetSSHKey(id string) (*SSHKeyResponse, error) {
+func (c *SSHKey) GetSSHKey(id string) ([]*SSHKeyResponse, error) {
 	op := &request.Operation{
 		Name:       "GetSSHKey",
 		HTTPMethod: "GET",
-		HTTPPath:   fmt.Sprintf("/sshkeys/%s", id),
+		HTTPPath:   "/sshkeys/{id}",
 	}
 
-	var sshKey SSHKeyResponse
-	req := c.newRequest(op, nil, &sshKey)
+	var sshKey []*SSHKeyResponse
+	req := c.newRequest(op, &GetSSHKeyInput{ID: id}, &sshKey)
 
-	return &sshKey, req.Send()
+	return sshKey, req.Send()
 }
 
 // CreateSSHKey creates a new SSH key
-func (c *SSHKey) CreateSSHKey(input *CreateSSHKeyInput) (*SSHKeyResponse, error) {
+func (c *SSHKey) CreateSSHKey(input *CreateSSHKeyInput) (string, error) {
 	op := &request.Operation{
 		Name:       "CreateSSHKey",
 		HTTPMethod: "POST",
 		HTTPPath:   "/sshkeys",
 	}
 
-	var sshKey SSHKeyResponse
+	var sshKey string
 	req := c.newRequest(op, input, &sshKey)
 
-	return &sshKey, req.Send()
+	req.Handlers.Unmarshal.RemoveByName("datacrunchsdk.restjson.Unmarshal")
+	req.Handlers.Unmarshal.PushBackNamed(restjson.StringUnmarshalHandler)
+
+	return sshKey, req.Send()
 }
 
 // DeleteSSHKeys deletes multiple SSH keys
@@ -83,15 +88,23 @@ func (c *SSHKey) DeleteSSHKeys(input *DeleteSSHKeysInput) error {
 	return req.Send()
 }
 
+type DeleteSSHKeyInput struct {
+	ID string `location:"uri" locationName:"id"`
+}
+
 // DeleteSSHKey deletes a single SSH key by ID
 func (c *SSHKey) DeleteSSHKey(id string) error {
 	op := &request.Operation{
 		Name:       "DeleteSSHKey",
 		HTTPMethod: "DELETE",
-		HTTPPath:   fmt.Sprintf("/sshkeys/%s", id),
+		HTTPPath:   "/sshkeys/{id}",
 	}
 
-	req := c.newRequest(op, nil, nil)
+	input := &DeleteSSHKeyInput{
+		ID: id,
+	}
+
+	req := c.newRequest(op, input, nil)
 
 	return req.Send()
 }

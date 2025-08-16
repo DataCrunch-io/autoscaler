@@ -1,6 +1,7 @@
-package config
+package datacrunch
 
 import (
+	"log/slog"
 	"time"
 
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/credentials"
@@ -18,6 +19,10 @@ type Config struct {
 	// Retry configuration
 	MaxRetries *int
 	Retryer    interface{}
+
+	// Logging configuration default to false
+	Debug  bool
+	Logger *slog.Logger
 }
 
 // Option is a functional option for configuring the DataCrunch client
@@ -31,15 +36,41 @@ func (c *Config) Copy(cfgs ...*Config) *Config {
 		Credentials: c.Credentials,
 		MaxRetries:  c.MaxRetries,
 		Retryer:     c.Retryer,
+		Debug:       c.Debug,
+		Logger:      c.Logger,
 	}
 
 	for _, cfg := range cfgs {
 		if cfg.BaseURL != nil {
 			newConfig.BaseURL = cfg.BaseURL
 		}
+		if cfg.Timeout != nil {
+			newConfig.Timeout = cfg.Timeout
+		}
+		if cfg.Credentials != nil {
+			newConfig.Credentials = cfg.Credentials
+		}
+		if cfg.MaxRetries != nil {
+			newConfig.MaxRetries = cfg.MaxRetries
+		}
+		if cfg.Retryer != nil {
+			newConfig.Retryer = cfg.Retryer
+		}
+		if cfg.Logger != nil {
+			newConfig.Logger = cfg.Logger
+		}
 	}
 
 	return newConfig
+}
+
+// New creates a new Config
+func NewConfig(options ...Option) *Config {
+	cfg := &Config{}
+	for _, option := range options {
+		option(cfg)
+	}
+	return cfg
 }
 
 // WithBaseURL sets the base URL for the API
@@ -93,4 +124,18 @@ func WithRetryer(retryer interface{}) Option {
 // WithNoRetries disables retry functionality entirely
 func WithNoRetries() Option {
 	return WithRetryConfig(0, 0, 0)
+}
+
+// WithDebug enables or disables debug logging
+func WithDebug(debug bool) Option {
+	return func(c *Config) {
+		c.Debug = debug
+	}
+}
+
+// WithLogger sets a custom logger
+func WithLogger(logger *slog.Logger) Option {
+	return func(c *Config) {
+		c.Logger = logger
+	}
 }

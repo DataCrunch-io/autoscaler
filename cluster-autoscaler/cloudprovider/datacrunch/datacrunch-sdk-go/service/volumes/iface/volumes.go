@@ -7,7 +7,7 @@ import (
 // VolumesAPI provides the interface for the volumes service
 type VolumesAPI interface {
 	// ListVolumes lists all volumes
-	ListVolumes() ([]*volumes.VolumeResponse, error)
+	ListVolumes(status *volumes.ListVolumesStatus) ([]*volumes.VolumeResponse, error)
 	// GetVolume gets a volume by ID
 	GetVolume(id string) (*volumes.VolumeResponse, error)
 	// CreateVolume creates a new volume

@@ -9,16 +9,19 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider"
 	"k8s.io/autoscaler/cluster-autoscaler/config"
 	schedulerframework "k8s.io/autoscaler/cluster-autoscaler/simulator/framework"
+	"k8s.io/client-go/kubernetes"
 	klog "k8s.io/klog/v2"
 )
 
 type Asg struct {
 	manager      *DatacrunchManager
+	kubeClient   kubernetes.Interface
 	minSize      int
 	maxSize      int
-	locationCode string
 	id           string
 	instanceType string
+
+	AvailabilityLocations []string
 
 	asgMutex sync.Mutex
 }
@@ -37,6 +40,7 @@ func (asg *Asg) MinSize() int {
 // number is different from the number of nodes registered in Kubernetes.
 func (asg *Asg) TargetSize() (int, error) {
 	size, err := asg.manager.GetAsgSize(asg)
+	klog.V(4).Infof("[DEBUG] TargetSize for ASG %s: %d (err: %v)", asg.id, size, err)
 	return int(size), err
 }
 
@@ -60,13 +64,14 @@ func (asg *Asg) IncreaseSize(delta int) error {
 	// instead of delegate to manager we need to do all in ASG scope
 
 	// check if required resources are available
-	available, err := asg.manager.instanceTypeAvailable(asg.instanceType, asg.locationCode)
+	location, err := asg.manager.instanceTypeAvailableLocation(asg.instanceType, asg.AvailabilityLocations)
 	if err != nil {
-		return fmt.Errorf("failed to check if instance type %s in location %s is available: %v", asg.instanceType, asg.locationCode, err)
+		return fmt.Errorf("failed to check if instance type %s is available: %v", asg.instanceType, err)
 	}
-	if !available {
-		return fmt.Errorf("instance type %s is not available in location %s", asg.instanceType, asg.locationCode)
+	if location == "" {
+		return fmt.Errorf("instance type %s is not available in any of the locations", asg.instanceType)
 	}
+	klog.V(2).Infof("instance type %s is available in location %s", asg.instanceType, location)
 
 	// set post update action like update cache or update target size
 	defer func() {
@@ -86,14 +91,27 @@ func (asg *Asg) IncreaseSize(delta int) error {
 	errsCh := make(chan error, delta)
 	for i := 0; i < delta; i++ {
 		waitGroup.Add(1)
-		go func() {
+		go func(index int, location string) {
 			defer waitGroup.Done()
-			instanceID, err := asg.manager.createInstanceForAsg(asg, nodeConfig, i)
+			klog.V(3).Infof("[DEBUG] Creating instance %d/%d for ASG %s", index+1, delta, asg.id)
+			instanceID, hostname, err := asg.manager.createInstanceForAsg(asg, nodeConfig, location)
 			if err != nil {
+				klog.Errorf("[DEBUG] Failed to create instance %d for ASG %s: %v", index+1, asg.id, err)
 				errsCh <- err
+			} else {
+				// if exists do nothing
+				node, err := getNodeByName(asg.kubeClient, hostname)
+				if err != nil {
+					klog.V(2).Infof("node %s not found in k8s", hostname)
+				}
+				if node != nil {
+					// if not exists then need to need update over k8s api
+					providerID := fmt.Sprintf("%s%s/%s", datacrunchProviderIDPrefix, location, hostname)
+					setNodeProviderID(asg.kubeClient, hostname, providerID)
+				}
+				klog.V(2).Infof("[DEBUG] Successfully created instance %s (hostname: %s) for ASG %s [%d/%d]", instanceID, hostname, asg.id, index+1, delta)
 			}
-			klog.V(3).Infof("successfully created instance %s for ASG %s", instanceID, asg.id)
-		}()
+		}(i, location)
 	}
 	waitGroup.Wait()
 	close(errsCh)
@@ -138,7 +156,7 @@ func (asg *Asg) DecreaseTargetSize(delta int) error {
 	}()
 
 	// get all instances by ASG
-	instances, err := asg.manager.allInstances(asg.id)
+	instances, err := asg.manager.dcService.GetAllInstancesByDescription(asg.id)
 	if err != nil {
 		return fmt.Errorf("failed to get instances for ASG %s: %v", asg.id, err)
 	}
@@ -175,18 +193,25 @@ func (asg *Asg) DecreaseTargetSize(delta int) error {
 
 // Belongs returns true if the given node belongs to the ASG.
 func (asg *Asg) Belongs(node *apiv1.Node) (bool, error) {
-	instanceID, _, err := toInstanceIDAndHostname(node.Spec.ProviderID)
+	klog.V(4).Infof("[DEBUG] Belongs() called for node %s against ASG %s", node.Name, asg.id)
+	_, hostname, err := toInstanceIDAndHostname(node.Spec.ProviderID)
 	if err != nil {
+		klog.V(4).Infof("[DEBUG] Failed to parse providerID for node %s: %v", node.Name, err)
 		return false, err
 	}
-	targetAsg, err := asg.manager.GetAsgForInstance(instanceID)
+	klog.V(4).Infof("[DEBUG] Checking if hostname %s belongs to ASG %s", hostname, asg.id)
+	targetAsg, err := asg.manager.GetAsgForInstanceByHostname(hostname)
 	if err != nil {
+		klog.V(4).Infof("[DEBUG] Error finding ASG for hostname %s: %v", hostname, err)
 		return false, err
 	}
 	if targetAsg == nil {
+		klog.V(4).Infof("[DEBUG] No ASG found for hostname %s", hostname)
 		return false, fmt.Errorf("%s doesn't belong to a known Asg", node.Name)
 	}
-	return targetAsg.Id() == asg.Id(), nil
+	belongs := targetAsg.Id() == asg.Id()
+	klog.V(4).Infof("[DEBUG] Node %s belongs to ASG %s: %t (target ASG: %s)", node.Name, asg.id, belongs, targetAsg.Id())
+	return belongs, nil
 }
 
 // DeleteNodes deletes the nodes from the group.
@@ -231,12 +256,16 @@ func (asg *Asg) Debug() string {
 
 // Nodes returns a list of all nodes that belong to this node group.
 func (asg *Asg) Nodes() ([]cloudprovider.Instance, error) {
+	klog.V(4).Infof("[DEBUG] Nodes() called for ASG %s", asg.id)
 	instanceNames, err := asg.manager.GetAsgNodes(asg)
 	if err != nil {
+		klog.V(3).Infof("[DEBUG] Error getting nodes for ASG %s: %v", asg.id, err)
 		return nil, err
 	}
+	klog.V(4).Infof("[DEBUG] ASG %s has %d nodes", asg.id, len(instanceNames))
 	instances := make([]cloudprovider.Instance, 0, len(instanceNames))
-	for _, instanceName := range instanceNames {
+	for i, instanceName := range instanceNames {
+		klog.V(5).Infof("[DEBUG] ASG %s node %d: %s", asg.id, i+1, instanceName)
 		instances = append(instances, cloudprovider.Instance{Id: instanceName})
 	}
 	return instances, nil
@@ -244,18 +273,23 @@ func (asg *Asg) Nodes() ([]cloudprovider.Instance, error) {
 
 // TemplateNodeInfo returns a node template for this node group.
 func (asg *Asg) TemplateNodeInfo() (*schedulerframework.NodeInfo, error) {
+	klog.V(4).Infof("[DEBUG] TemplateNodeInfo requested for ASG %s (type: %s)",
+		asg.id, asg.instanceType)
 	template, err := asg.manager.getAsgTemplate(asg.id)
 	if err != nil {
+		klog.Errorf("[DEBUG] Failed to get template for ASG %s: %v", asg.id, err)
 		return nil, err
 	}
 
 	node, err := asg.manager.buildNodeFromTemplate(asg, template)
 	if err != nil {
-		klog.Errorf("failed to build node from template for ASG %s: %v", asg.Id(), err)
+		klog.Errorf("[DEBUG] Failed to build node from template for ASG %s: %v", asg.Id(), err)
 		return nil, err
 	}
 
 	nodeInfo := schedulerframework.NewNodeInfo(node, nil)
+	klog.V(4).Infof("[DEBUG] Created template node for ASG %s: CPU=%v, Memory=%v, GPU=%v",
+		asg.id, node.Status.Capacity["cpu"], node.Status.Capacity["memory"], node.Status.Capacity["nvidia.com/gpu"])
 	return nodeInfo, nil
 }
 

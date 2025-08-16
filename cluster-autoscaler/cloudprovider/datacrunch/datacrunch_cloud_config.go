@@ -7,13 +7,16 @@ import (
 
 // cloudConfig represents the global configuration for DataCrunch autoscaler
 type cloudConfig struct {
-	Image             imageConfig                `json:"image"`
-	SSHKeyIDs         []string                   `json:"sshKeyIDs"`
-	BillingConfig     billingConfig              `json:"billingConfig"`
-	Labels            labelConfig                `json:"labels"`
-	StartupScript     string                     `json:"startingScript"`     // base64 encoded, required
-	AdditionalVolumes []additionalVolume         `json:"additionalVolumes"`  // optional
-	Taints            []apiv1.Taint             `json:"taints"`            // optional
+	Image              imageConfig        `json:"image"`
+	SSHKeyIDs          []string           `json:"sshKeyIDs"`
+	BillingConfig      billingConfig      `json:"billingConfig"`
+	Labels             labelConfig        `json:"labels"`
+	Debug              bool               `json:"debug"`
+	AvailableLocations []string           `json:"availableLocations"`
+	StartupScript      string             `json:"startupScript"`     // base64 encoded, required
+	StartupScriptEnv   map[string]string  `json:"startupScriptEnv"`  // all key will be capitalized and the value will be string
+	AdditionalVolumes  []additionalVolume `json:"additionalVolumes"` // optional
+	Taints             []apiv1.Taint      `json:"taints"`            // optional
 }
 
 // imageConfig holds GPU and CPU specific images
@@ -80,6 +83,18 @@ func (cfg *cloudConfig) isValid() bool {
 	// Validate startup script is provided
 	if cfg.StartupScript == "" {
 		klog.Errorf("StartupScript is required")
+		return false
+	}
+
+	// Validate available locations
+	if len(cfg.AvailableLocations) == 0 {
+		klog.Errorf("AvailableLocations is required")
+		return false
+	}
+
+	// Validate debug is a boolean
+	if cfg.Debug != true && cfg.Debug != false {
+		klog.Errorf("Debug must be a boolean")
 		return false
 	}
 

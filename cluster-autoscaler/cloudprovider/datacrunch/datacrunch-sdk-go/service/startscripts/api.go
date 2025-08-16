@@ -1,9 +1,8 @@
 package startscripts
 
 import (
-	"fmt"
-
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/internal/protocol/restjson"
 )
 
 // StartScriptResponse represents a startup script
@@ -24,6 +23,14 @@ type DeleteStartScriptsInput struct {
 	Scripts []string `json:"scripts"`
 }
 
+type GetStartScriptInput struct {
+	ID string `location:"uri" locationName:"id"`
+}
+
+type DeleteStartScriptInput struct {
+	ID string `location:"uri" locationName:"id"`
+}
+
 // ListStartScripts lists all startup scripts
 func (c *StartScripts) ListStartScripts() ([]*StartScriptResponse, error) {
 	op := &request.Operation{
@@ -39,17 +46,27 @@ func (c *StartScripts) ListStartScripts() ([]*StartScriptResponse, error) {
 }
 
 // GetStartScript gets a single startup script by ID
-func (c *StartScripts) GetStartScript(id string) (*StartScriptResponse, error) {
+func (c *StartScripts) GetStartScript(id string) ([]*StartScriptResponse, error) {
 	op := &request.Operation{
 		Name:       "GetStartScript",
 		HTTPMethod: "GET",
-		HTTPPath:   fmt.Sprintf("/scripts/%s", id),
+		HTTPPath:   "/scripts/{id}",
 	}
 
-	var script StartScriptResponse
-	req := c.newRequest(op, nil, &script)
+	input := &GetStartScriptInput{
+		ID: id,
+	}
 
-	return &script, req.Send()
+	// API returns array, so unmarshal as array and take first element
+	var scripts []*StartScriptResponse
+	req := c.newRequest(op, input, &scripts)
+
+	err := req.Send()
+	if err != nil {
+		return nil, err
+	}
+
+	return scripts, nil
 }
 
 // CreateStartScript creates a new startup script
@@ -62,6 +79,10 @@ func (c *StartScripts) CreateStartScript(input *CreateStartScriptInput) (string,
 
 	var scriptID string
 	req := c.newRequest(op, input, &scriptID)
+
+	// This API returns a plain string, not JSON, so use string unmarshaler
+	req.Handlers.Unmarshal.RemoveByName("datacrunchsdk.restjson.Unmarshal")
+	req.Handlers.Unmarshal.PushBackNamed(restjson.StringUnmarshalHandler)
 
 	return scriptID, req.Send()
 }
@@ -84,10 +105,14 @@ func (c *StartScripts) DeleteStartScript(id string) error {
 	op := &request.Operation{
 		Name:       "DeleteStartScript",
 		HTTPMethod: "DELETE",
-		HTTPPath:   fmt.Sprintf("/scripts/%s", id),
+		HTTPPath:   "/scripts/{id}",
 	}
 
-	req := c.newRequest(op, nil, nil)
+	input := &DeleteStartScriptInput{
+		ID: id,
+	}
+
+	req := c.newRequest(op, input, nil)
 
 	return req.Send()
 }

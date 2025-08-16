@@ -16,9 +16,9 @@ type VolumeTypeResponse struct {
 	Type                 string `json:"type"`
 	Price                Price  `json:"price"`
 	IsSharedFS           bool   `json:"is_shared_fs"`
-	BurstBandwidth       int    `json:"burst_bandwidth"`
-	ContinuousBandwidth  int    `json:"continuous_bandwidth"`
-	InternalNetworkSpeed int    `json:"internal_network_speed"`
+	BurstBandwidth       int64  `json:"burst_bandwidth"`
+	ContinuousBandwidth  int64  `json:"continuous_bandwidth"`
+	InternalNetworkSpeed int64  `json:"internal_network_speed"`
 	IOPS                 string `json:"iops"`
 }
 

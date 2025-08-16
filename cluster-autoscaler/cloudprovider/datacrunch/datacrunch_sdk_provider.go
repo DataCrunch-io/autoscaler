@@ -8,8 +8,8 @@ type datacrunchSDKProvider struct {
 	session *session.Session
 }
 
-func createDatacrunchSDKProvider() (*datacrunchSDKProvider, error) {
-	sess := session.NewFromEnv()
+func createDatacrunchSDKProvider(cfg *cloudConfig) (*datacrunchSDKProvider, error) {
+	sess := session.NewFromEnv(session.WithDebug(cfg.Debug))
 	provider := &datacrunchSDKProvider{
 		session: sess,
 	}

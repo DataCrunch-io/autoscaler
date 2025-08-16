@@ -2,21 +2,14 @@ package jsonutil
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"io"
 	"math"
-	"math/big"
 	"reflect"
 	"strings"
-	"time"
 
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/dcerr"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/internal/protocol"
 )
-
-var millisecondsFloat = new(big.Float).SetInt64(1e3)
 
 // UnmarshalJSONError unmarshal's the reader's JSON document into the passed in
 // type. The value to unmarshal the json document into must be a pointer to the
@@ -38,300 +31,325 @@ func UnmarshalJSONError(v interface{}, stream io.Reader) error {
 	return nil
 }
 
-// UnmarshalJSON reads a stream and unmarshals the results in object v.
+// UnmarshalJSON reads a stream and unmarshals the results in object v with locationName support.
 func UnmarshalJSON(v interface{}, stream io.Reader) error {
-	var out interface{}
-
-	decoder := json.NewDecoder(stream)
-	decoder.UseNumber()
-	err := decoder.Decode(&out)
-	if err == io.EOF {
-		return nil
-	} else if err != nil {
-		return err
-	}
-
-	return unmarshaler{}.unmarshalAny(reflect.ValueOf(v), out, "")
+	return unmarshalWithLocationName(v, stream, false)
 }
 
 // UnmarshalJSONCaseInsensitive reads a stream and unmarshals the result into the
 // object v. Ignores casing for structure members.
 func UnmarshalJSONCaseInsensitive(v interface{}, stream io.Reader) error {
-	var out interface{}
+	return unmarshalWithLocationName(v, stream, true)
+}
 
+func unmarshalWithLocationName(v interface{}, stream io.Reader, caseInsensitive bool) error {
+	// First, unmarshal into a generic interface to handle both objects and arrays
+	var raw interface{}
 	decoder := json.NewDecoder(stream)
 	decoder.UseNumber()
-	err := decoder.Decode(&out)
-	if err == io.EOF {
-		return nil
-	} else if err != nil {
+
+	if err := decoder.Decode(&raw); err != nil {
+		if err == io.EOF {
+			return nil
+		}
 		return err
 	}
 
-	return unmarshaler{
-		caseInsensitive: true,
-	}.unmarshalAny(reflect.ValueOf(v), out, "")
-}
+	var converted interface{}
+	var presentFields map[string]bool
 
-type unmarshaler struct {
-	caseInsensitive bool
-}
-
-func (u unmarshaler) unmarshalAny(value reflect.Value, data interface{}, tag reflect.StructTag) error {
-	vtype := value.Type()
-	if vtype.Kind() == reflect.Ptr {
-		vtype = vtype.Elem() // check kind of actual element type
-	}
-
-	t := tag.Get("type")
-	if t == "" {
-		switch vtype.Kind() {
-		case reflect.Struct:
-			// also it can't be a time object
-			if _, ok := value.Interface().(*time.Time); !ok {
-				t = "structure"
-			}
-		case reflect.Slice:
-			// also it can't be a byte slice
-			if _, ok := value.Interface().([]byte); !ok {
-				t = "list"
-			}
-		case reflect.Map:
-			// cannot be a JSONValue map
-			if _, ok := value.Interface().(map[string]interface{}); !ok {
-				t = "map"
+	// Handle different response types
+	switch rawData := raw.(type) {
+	case map[string]interface{}:
+		// Object response - convert field names and track present fields
+		converted, presentFields = convertMapKeys(rawData, reflect.TypeOf(v), caseInsensitive)
+	case []interface{}:
+		// Array response - convert each element if it's an object
+		elementType := getArrayElementType(reflect.TypeOf(v))
+		convertedArray := make([]interface{}, len(rawData))
+		for i, item := range rawData {
+			if itemMap, ok := item.(map[string]interface{}); ok {
+				// Convert field names for object elements in array
+				convertedItem, _ := convertMapKeys(itemMap, elementType, caseInsensitive)
+				convertedArray[i] = convertedItem
+			} else {
+				// Keep non-object elements as-is
+				convertedArray[i] = item
 			}
 		}
-	}
-
-	switch t {
-	case "structure":
-		if field, ok := vtype.FieldByName("_"); ok {
-			tag = field.Tag
-		}
-		return u.unmarshalStruct(value, data, tag)
-	case "list":
-		return u.unmarshalList(value, data, tag)
-	case "map":
-		return u.unmarshalMap(value, data, tag)
+		converted = convertedArray
 	default:
-		return u.unmarshalScalar(value, data, tag)
+		// Primitive values (string, number, boolean) - keep as-is
+		converted = raw
 	}
+
+	// Marshal back to JSON and use standard unmarshaling
+	data, err := json.Marshal(converted)
+	if err != nil {
+		return err
+	}
+
+	// Use standard JSON unmarshaling with proper type conversion
+	decoder2 := json.NewDecoder(bytes.NewReader(data))
+	decoder2.UseNumber()
+
+	if err := decoder2.Decode(v); err != nil {
+		return err
+	}
+
+	// Handle field presence for omitempty fields (only for object responses)
+	if rawMap, ok := raw.(map[string]interface{}); ok {
+		if err := handleFieldPresence(reflect.ValueOf(v), presentFields, caseInsensitive); err != nil {
+			return err
+		}
+		return handleSpecialFloats(reflect.ValueOf(v), rawMap)
+	}
+
+	return nil
 }
 
-func (u unmarshaler) unmarshalStruct(value reflect.Value, data interface{}, tag reflect.StructTag) error {
-	if data == nil {
-		return nil
-	}
-	mapData, ok := data.(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("JSON value is not a structure (%#v)", data)
-	}
-
-	t := value.Type()
-	if value.Kind() == reflect.Ptr {
-		if value.IsNil() { // create the structure if it's nil
-			s := reflect.New(value.Type().Elem())
-			value.Set(s)
-			value = s
-		}
-
-		value = value.Elem()
+// getArrayElementType gets the element type for array/slice types
+func getArrayElementType(t reflect.Type) reflect.Type {
+	if t.Kind() == reflect.Ptr {
 		t = t.Elem()
 	}
+	if t.Kind() == reflect.Slice || t.Kind() == reflect.Array {
+		return t.Elem()
+	}
+	// If not an array, return the type as-is
+	return t
+}
 
-	// unwrap any payloads
-	if payload := tag.Get("payload"); payload != "" {
-		field, _ := t.FieldByName(payload)
-		return u.unmarshalAny(value.FieldByName(payload), data, field.Tag)
+// convertMapKeys converts JSON field names back to struct field names and tracks field presence
+func convertMapKeys(data map[string]interface{}, structType reflect.Type, caseInsensitive bool) (map[string]interface{}, map[string]bool) {
+	if structType.Kind() == reflect.Ptr {
+		structType = structType.Elem()
 	}
 
-	for i := 0; i < t.NumField(); i++ {
-		field := t.Field(i)
+	if structType.Kind() != reflect.Struct {
+		return data, nil
+	}
+
+	result := make(map[string]interface{})
+	presentFields := make(map[string]bool)
+
+	// Create mapping from locationName/json name to struct info
+	type fieldInfo struct {
+		goFieldName   string
+		jsonFieldName string
+	}
+	fieldMapping := make(map[string]fieldInfo)
+	for i := 0; i < structType.NumField(); i++ {
+		field := structType.Field(i)
 		if field.PkgPath != "" {
-			continue // ignore unexported fields
+			continue // skip unexported fields
 		}
 
-		// figure out what this field is called
-		name := field.Name
-		if locName := field.Tag.Get("locationName"); locName != "" {
-			name = locName
+		fieldName := field.Name
+
+		// Determine the target JSON field name for standard unmarshaling
+		var targetJSONName string
+		if jsonName := field.Tag.Get("json"); jsonName != "" {
+			targetJSONName = strings.Split(jsonName, ",")[0]
+			if targetJSONName == "-" {
+				continue // Skip fields marked with json:"-"
+			}
+		} else {
+			targetJSONName = fieldName
 		}
-		if u.caseInsensitive {
-			if _, ok := mapData[name]; !ok {
-				// Fallback to uncased name search if the exact name didn't match.
-				for kn, v := range mapData {
-					if strings.EqualFold(kn, name) {
-						mapData[name] = v
+
+		info := fieldInfo{
+			goFieldName:   fieldName,
+			jsonFieldName: targetJSONName,
+		}
+
+		// Check locationName first, then json tag
+		if locName := field.Tag.Get("locationName"); locName != "" {
+			fieldMapping[locName] = info
+			if caseInsensitive {
+				fieldMapping[strings.ToLower(locName)] = info
+			}
+		} else if jsonName := field.Tag.Get("json"); jsonName != "" {
+			name := strings.Split(jsonName, ",")[0]
+			if name != "-" {
+				fieldMapping[name] = info
+				if caseInsensitive {
+					fieldMapping[strings.ToLower(name)] = info
+				}
+			}
+		} else {
+			fieldMapping[fieldName] = info
+			if caseInsensitive {
+				fieldMapping[strings.ToLower(fieldName)] = info
+			}
+		}
+	}
+
+	// Convert the data using the mapping and track presence
+	for jsonKey, jsonValue := range data {
+		searchKey := jsonKey
+		if caseInsensitive {
+			searchKey = strings.ToLower(jsonKey)
+		}
+
+		if fieldInfo, found := fieldMapping[searchKey]; found {
+			// Mark field as present (using Go field name for presence tracking)
+			presentFields[fieldInfo.goFieldName] = true
+
+			// Recursively handle nested structures
+			if nestedMap, ok := jsonValue.(map[string]interface{}); ok {
+				// Find the field type for recursive processing
+				if field, found := structType.FieldByName(fieldInfo.goFieldName); found {
+					fieldType := field.Type
+					if fieldType.Kind() == reflect.Ptr {
+						fieldType = fieldType.Elem()
 					}
+					convertedNested, _ := convertMapKeys(nestedMap, fieldType, caseInsensitive)
+					jsonValue = convertedNested
+				}
+			}
+			// Use JSON field name for the result (for standard JSON unmarshaling)
+			result[fieldInfo.jsonFieldName] = jsonValue
+		} else {
+			// Keep the original key if no mapping found
+			result[jsonKey] = jsonValue
+		}
+	}
+
+	return result, presentFields
+}
+
+// handleFieldPresence handles omitempty fields based on their presence in JSON
+func handleFieldPresence(v reflect.Value, presentFields map[string]bool, caseInsensitive bool) error {
+	if presentFields == nil {
+		return nil
+	}
+
+	v = reflect.Indirect(v)
+	if v.Kind() != reflect.Struct {
+		return nil
+	}
+
+	vType := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		field := vType.Field(i)
+		fieldValue := v.Field(i)
+
+		if !fieldValue.CanSet() {
+			continue
+		}
+
+		fieldName := field.Name
+		jsonTag := field.Tag.Get("json")
+
+		// Only process fields with omitempty tag
+		if jsonTag == "" || !strings.Contains(jsonTag, "omitempty") {
+			continue
+		}
+
+		// Check if field was present in JSON
+		wasPresent := presentFields[fieldName]
+
+		// If field was not present and has omitempty, reset to zero value
+		if !wasPresent {
+			switch fieldValue.Kind() {
+			case reflect.String:
+				// For string fields with omitempty that are not present,
+				// we need to distinguish from empty string that WAS present
+				// Since standard unmarshaling already happened, we can't change this
+				// without a more complex implementation using custom types
+			case reflect.Ptr:
+				// For pointer fields, set to nil if not present
+				fieldValue.Set(reflect.Zero(fieldValue.Type()))
+			case reflect.Slice, reflect.Map:
+				// For slices/maps, set to nil if not present
+				fieldValue.Set(reflect.Zero(fieldValue.Type()))
+			}
+		}
+	}
+
+	return nil
+}
+
+// handleSpecialFloats handles javascript special float values like "NaN", "Infinity"
+func handleSpecialFloats(v reflect.Value, rawData map[string]interface{}) error {
+	v = reflect.Indirect(v)
+	if v.Kind() != reflect.Struct {
+		return nil
+	}
+
+	vType := v.Type()
+	for i := 0; i < v.NumField(); i++ {
+		field := vType.Field(i)
+		fieldValue := v.Field(i)
+
+		if !fieldValue.CanSet() {
+			continue
+		}
+
+		// Get the JSON field name to look up in rawData
+		jsonFieldName := field.Name
+		if locName := field.Tag.Get("locationName"); locName != "" {
+			jsonFieldName = locName
+		} else if jsonName := field.Tag.Get("json"); jsonName != "" {
+			jsonFieldName = strings.Split(jsonName, ",")[0]
+		}
+
+		rawValue, exists := rawData[jsonFieldName]
+		if !exists {
+			continue
+		}
+
+		// Handle special string values for float fields
+		if strValue, ok := rawValue.(string); ok {
+			switch fieldValue.Kind() {
+			case reflect.Float32, reflect.Float64:
+				var floatVal float64
+				switch {
+				case strings.EqualFold(strValue, floatNaN):
+					floatVal = math.NaN()
+				case strings.EqualFold(strValue, floatInf):
+					floatVal = math.Inf(1)
+				case strings.EqualFold(strValue, floatNegInf):
+					floatVal = math.Inf(-1)
+				default:
+					continue
+				}
+
+				if fieldValue.Kind() == reflect.Float32 {
+					fieldValue.SetFloat(floatVal)
+				} else {
+					fieldValue.SetFloat(floatVal)
+				}
+			case reflect.Ptr:
+				if fieldValue.Type().Elem().Kind() == reflect.Float64 {
+					var floatVal float64
+					switch {
+					case strings.EqualFold(strValue, floatNaN):
+						floatVal = math.NaN()
+					case strings.EqualFold(strValue, floatInf):
+						floatVal = math.Inf(1)
+					case strings.EqualFold(strValue, floatNegInf):
+						floatVal = math.Inf(-1)
+					default:
+						continue
+					}
+					fieldValue.Set(reflect.ValueOf(&floatVal))
 				}
 			}
 		}
 
-		member := value.FieldByIndex(field.Index)
-		err := u.unmarshalAny(member, mapData[name], field.Tag)
-		if err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (u unmarshaler) unmarshalList(value reflect.Value, data interface{}, tag reflect.StructTag) error {
-	if data == nil {
-		return nil
-	}
-	listData, ok := data.([]interface{})
-	if !ok {
-		return fmt.Errorf("JSON value is not a list (%#v)", data)
-	}
-
-	// Handle pointer to slice
-	if value.Kind() == reflect.Ptr {
-		if value.IsNil() {
-			// Create new slice
-			sliceType := value.Type().Elem()
-			l := len(listData)
-			newSlice := reflect.MakeSlice(sliceType, l, l)
-			value.Set(reflect.New(sliceType))
-			value.Elem().Set(newSlice)
-		}
-		value = value.Elem()
-	}
-
-	if value.IsNil() {
-		l := len(listData)
-		value.Set(reflect.MakeSlice(value.Type(), l, l))
-	}
-
-	for i, c := range listData {
-		err := u.unmarshalAny(value.Index(i), c, "")
-		if err != nil {
-			return err
+		// Handle nested structs recursively
+		if fieldValue.Kind() == reflect.Struct {
+			if nestedMap, ok := rawValue.(map[string]interface{}); ok {
+				handleSpecialFloats(fieldValue, nestedMap)
+			}
+		} else if fieldValue.Kind() == reflect.Ptr && !fieldValue.IsNil() && fieldValue.Elem().Kind() == reflect.Struct {
+			if nestedMap, ok := rawValue.(map[string]interface{}); ok {
+				handleSpecialFloats(fieldValue.Elem(), nestedMap)
+			}
 		}
 	}
 
-	return nil
-}
-
-func (u unmarshaler) unmarshalMap(value reflect.Value, data interface{}, tag reflect.StructTag) error {
-	if data == nil {
-		return nil
-	}
-	mapData, ok := data.(map[string]interface{})
-	if !ok {
-		return fmt.Errorf("JSON value is not a map (%#v)", data)
-	}
-
-	if value.IsNil() {
-		value.Set(reflect.MakeMap(value.Type()))
-	}
-
-	for k, v := range mapData {
-		kvalue := reflect.ValueOf(k)
-		vvalue := reflect.New(value.Type().Elem()).Elem()
-
-		err := u.unmarshalAny(vvalue, v, "")
-		if err != nil {
-			return err
-		}
-		value.SetMapIndex(kvalue, vvalue)
-	}
-
-	return nil
-}
-
-func (u unmarshaler) unmarshalScalar(value reflect.Value, data interface{}, tag reflect.StructTag) error {
-
-	switch d := data.(type) {
-	case nil:
-		return nil // nothing to do here
-	case string:
-		switch value.Interface().(type) {
-		case *string:
-			value.Set(reflect.ValueOf(&d))
-		case string:
-			value.Set(reflect.ValueOf(d))
-		case []byte:
-			b, err := base64.StdEncoding.DecodeString(d)
-			if err != nil {
-				return err
-			}
-			value.Set(reflect.ValueOf(b))
-		case *time.Time:
-			format := tag.Get("timestampFormat")
-			if len(format) == 0 {
-				format = protocol.ISO8601TimeFormatName
-			}
-
-			t, err := protocol.ParseTime(format, d)
-			if err != nil {
-				return err
-			}
-			value.Set(reflect.ValueOf(&t))
-		case map[string]interface{}:
-			// No need to use escaping as the value is a non-quoted string.
-			v, err := protocol.DecodeJSONValue(d, protocol.NoEscape)
-			if err != nil {
-				return err
-			}
-			value.Set(reflect.ValueOf(v))
-		case *float64:
-			// These are regular strings when parsed by encoding/json's unmarshaler.
-			switch {
-			case strings.EqualFold(d, floatNaN):
-				f := math.NaN()
-				value.Set(reflect.ValueOf(&f))
-			case strings.EqualFold(d, floatInf):
-				f := math.Inf(1)
-				value.Set(reflect.ValueOf(&f))
-			case strings.EqualFold(d, floatNegInf):
-				f := math.Inf(-1)
-				value.Set(reflect.ValueOf(&f))
-			default:
-				return fmt.Errorf("unknown JSON number value: %s", d)
-			}
-		default:
-			return fmt.Errorf("unsupported value: %v (%s)", value.Interface(), value.Type())
-		}
-	case json.Number:
-		switch value.Interface().(type) {
-		case *int64:
-			// Retain the old behavior where we would just truncate the float64
-			// calling d.Int64() here could cause an invalid syntax error due to the usage of strconv.ParseInt
-			f, err := d.Float64()
-			if err != nil {
-				return err
-			}
-			di := int64(f)
-			value.Set(reflect.ValueOf(&di))
-		case *float64:
-			f, err := d.Float64()
-			if err != nil {
-				return err
-			}
-			value.Set(reflect.ValueOf(&f))
-		case *time.Time:
-			float, ok := new(big.Float).SetString(d.String())
-			if !ok {
-				return fmt.Errorf("unsupported float time representation: %v", d.String())
-			}
-			float = float.Mul(float, millisecondsFloat)
-			ms, _ := float.Int64()
-			t := time.Unix(0, ms*1e6).UTC()
-			value.Set(reflect.ValueOf(&t))
-		default:
-			return fmt.Errorf("unsupported value: %v (%s)", value.Interface(), value.Type())
-		}
-	case bool:
-		switch value.Interface().(type) {
-		case *bool:
-			value.Set(reflect.ValueOf(&d))
-		default:
-			return fmt.Errorf("unsupported value: %v (%s)", value.Interface(), value.Type())
-		}
-	default:
-		return fmt.Errorf("unsupported JSON value (%v)", data)
-	}
 	return nil
 }

@@ -126,6 +126,10 @@ func (l *HandlerList) UpdateOrPushFront(n NamedHandler) {
 func (l *HandlerList) Run(r *Request) {
 	for _, h := range l.list {
 		h.Fn(r)
+		// Stop execution if an error occurred
+		if r.Error != nil {
+			break
+		}
 	}
 }
 

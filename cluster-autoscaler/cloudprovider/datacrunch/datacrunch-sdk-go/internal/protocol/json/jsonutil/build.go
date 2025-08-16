@@ -1,16 +1,10 @@
 package jsonutil
 
 import (
-	"bytes"
-	"encoding/base64"
-	"fmt"
+	"encoding/json"
 	"math"
 	"reflect"
-	"sort"
-	"strconv"
-	"time"
-
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/internal/protocol"
+	"strings"
 )
 
 const (
@@ -19,96 +13,50 @@ const (
 	floatNegInf = "-Infinity"
 )
 
-var timeType = reflect.ValueOf(time.Time{}).Type()
-var byteSliceType = reflect.ValueOf([]byte{}).Type()
-
-// BuildJSON builds a JSON string for a given object v.
+// BuildJSON builds a JSON string for a given object v with locationName support.
 func BuildJSON(v interface{}) ([]byte, error) {
-	var buf bytes.Buffer
-
-	err := buildAny(reflect.ValueOf(v), &buf, "")
-	return buf.Bytes(), err
+	return json.Marshal(locationNameWrapper{v})
 }
 
-func buildAny(value reflect.Value, buf *bytes.Buffer, tag reflect.StructTag) error {
-	origVal := value
-	value = reflect.Indirect(value)
-	if !value.IsValid() {
-		return nil
-	}
-
-	vtype := value.Type()
-
-	t := tag.Get("type")
-	if t == "" {
-		switch vtype.Kind() {
-		case reflect.Struct:
-			// also it can't be a time object
-			if value.Type() != timeType {
-				t = "structure"
-			}
-		case reflect.Slice:
-			// also it can't be a byte slice
-			if _, ok := value.Interface().([]byte); !ok {
-				t = "list"
-			}
-		case reflect.Map:
-			// cannot be a JSONValue map
-			if _, ok := value.Interface().(map[string]interface{}); !ok {
-				t = "map"
-			}
-		}
-	}
-
-	switch t {
-	case "structure":
-		if field, ok := vtype.FieldByName("_"); ok {
-			tag = field.Tag
-		}
-		return buildStruct(value, buf, tag)
-	case "list":
-		return buildList(value, buf, tag)
-	case "map":
-		return buildMap(value, buf, tag)
-	default:
-		return buildScalar(origVal, buf, tag)
-	}
+type locationNameWrapper struct {
+	value interface{}
 }
 
-func buildStruct(value reflect.Value, buf *bytes.Buffer, tag reflect.StructTag) error {
-	if !value.IsValid() {
-		return nil
+func (w locationNameWrapper) MarshalJSON() ([]byte, error) {
+	return marshalWithLocationName(reflect.ValueOf(w.value))
+}
+
+func marshalWithLocationName(v reflect.Value) ([]byte, error) {
+	v = reflect.Indirect(v)
+	if !v.IsValid() {
+		return json.Marshal(nil)
 	}
 
-	// unwrap payloads
-	if payload := tag.Get("payload"); payload != "" {
-		field, _ := value.Type().FieldByName(payload)
-		tag = field.Tag
-		value = elemOf(value.FieldByName(payload))
-		if !value.IsValid() && tag.Get("type") != "structure" {
-			return nil
+	if v.Kind() != reflect.Struct {
+		// Handle special cases for non-struct types
+		switch val := v.Interface().(type) {
+		case float64:
+			if math.IsNaN(val) {
+				return []byte("\"" + floatNaN + "\""), nil
+			} else if math.IsInf(val, 1) {
+				return []byte("\"" + floatInf + "\""), nil
+			} else if math.IsInf(val, -1) {
+				return []byte("\"" + floatNegInf + "\""), nil
+			}
 		}
+		return json.Marshal(v.Interface())
 	}
 
-	buf.WriteByte('{')
-	defer buf.WriteString("}")
+	// Build a map with locationName-mapped field names
+	result := make(map[string]interface{})
+	t := v.Type()
 
-	if !value.IsValid() {
-		return nil
-	}
-
-	t := value.Type()
-	first := true
-	for i := 0; i < t.NumField(); i++ {
-		member := value.Field(i)
-
-		// This allocates the most memory.
-		// Additionally, we cannot skip nil fields due to
-		// idempotency auto filling.
+	for i := 0; i < v.NumField(); i++ {
 		field := t.Field(i)
+		fieldValue := v.Field(i)
 
-		if field.PkgPath != "" {
-			continue // ignore unexported fields
+		if !fieldValue.CanInterface() {
+			continue
 		}
 		if field.Tag.Get("json") == "-" {
 			continue
@@ -120,201 +68,81 @@ func buildStruct(value reflect.Value, buf *bytes.Buffer, tag reflect.StructTag) 
 			continue
 		}
 
-		if protocol.CanSetIdempotencyToken(member, field) {
-			token := protocol.GetIdempotencyToken()
-			member = reflect.ValueOf(&token)
+		// Handle omitempty
+		jsonTag := field.Tag.Get("json")
+		isOmitEmpty := strings.Contains(jsonTag, "omitempty")
+
+		// Skip nil pointers, slices, and maps
+		if (fieldValue.Kind() == reflect.Ptr || fieldValue.Kind() == reflect.Slice || fieldValue.Kind() == reflect.Map) && fieldValue.IsNil() {
+			continue
 		}
 
-		if (member.Kind() == reflect.Ptr || member.Kind() == reflect.Slice || member.Kind() == reflect.Map) && member.IsNil() {
-			continue // ignore unset fields
+		// Skip zero values if omitempty is set
+		if isOmitEmpty && isZeroValue(fieldValue) {
+			continue
 		}
 
-		if first {
-			first = false
-		} else {
-			buf.WriteByte(',')
-		}
-
-		// figure out what this field is called
+		// Get field name priority: locationName > json > field name
 		name := field.Name
 		if locName := field.Tag.Get("locationName"); locName != "" {
 			name = locName
+		} else if jsonName := field.Tag.Get("json"); jsonName != "" {
+			name = strings.Split(jsonName, ",")[0]
 		}
 
-		writeString(name, buf)
-		buf.WriteString(`:`)
-
-		err := buildAny(member, buf, field.Tag)
-		if err != nil {
-			return err
-		}
-
-	}
-
-	return nil
-}
-
-func buildList(value reflect.Value, buf *bytes.Buffer, tag reflect.StructTag) error {
-	buf.WriteString("[")
-
-	for i := 0; i < value.Len(); i++ {
-		err := buildAny(value.Index(i), buf, "")
-		if err != nil {
-			return err
-		}
-
-		if i < value.Len()-1 {
-			buf.WriteString(",")
-		}
-	}
-
-	buf.WriteString("]")
-
-	return nil
-}
-
-type sortedValues []reflect.Value
-
-func (sv sortedValues) Len() int           { return len(sv) }
-func (sv sortedValues) Swap(i, j int)      { sv[i], sv[j] = sv[j], sv[i] }
-func (sv sortedValues) Less(i, j int) bool { return sv[i].String() < sv[j].String() }
-
-func buildMap(value reflect.Value, buf *bytes.Buffer, tag reflect.StructTag) error {
-	buf.WriteString("{")
-
-	sv := sortedValues(value.MapKeys())
-	sort.Sort(sv)
-
-	for i, k := range sv {
-		if i > 0 {
-			buf.WriteByte(',')
-		}
-
-		writeString(k.String(), buf)
-		buf.WriteString(`:`)
-
-		err := buildAny(value.MapIndex(k), buf, "")
-		if err != nil {
-			return err
-		}
-	}
-
-	buf.WriteString("}")
-
-	return nil
-}
-
-func buildScalar(v reflect.Value, buf *bytes.Buffer, tag reflect.StructTag) error {
-	// prevents allocation on the heap.
-	scratch := [64]byte{}
-	switch value := reflect.Indirect(v); value.Kind() {
-	case reflect.String:
-		writeString(value.String(), buf)
-	case reflect.Bool:
-		if value.Bool() {
-			buf.WriteString("true")
-		} else {
-			buf.WriteString("false")
-		}
-	case reflect.Int64:
-		buf.Write(strconv.AppendInt(scratch[:0], value.Int(), 10))
-	case reflect.Float64:
-		f := value.Float()
-		switch {
-		case math.IsNaN(f):
-			writeString(floatNaN, buf)
-		case math.IsInf(f, 1):
-			writeString(floatInf, buf)
-		case math.IsInf(f, -1):
-			writeString(floatNegInf, buf)
-		default:
-			buf.Write(strconv.AppendFloat(scratch[:0], f, 'f', -1, 64))
-		}
-	default:
-		switch converted := value.Interface().(type) {
-		case time.Time:
-			format := tag.Get("timestampFormat")
-			if len(format) == 0 {
-				format = protocol.UnixTimeFormatName
-			}
-
-			ts := protocol.FormatTime(format, converted)
-			if format != protocol.UnixTimeFormatName {
-				ts = `"` + ts + `"`
-			}
-
-			buf.WriteString(ts)
-		case []byte:
-			if !value.IsNil() {
-				buf.WriteByte('"')
-				if len(converted) < 1024 {
-					// for small buffers, using Encode directly is much faster.
-					dst := make([]byte, base64.StdEncoding.EncodedLen(len(converted)))
-					base64.StdEncoding.Encode(dst, converted)
-					_, err := buf.Write(dst)
-					if err != nil {
-						return fmt.Errorf("failed to write base64 encoded bytes: %v", err)
-					}
-				} else {
-					// for large buffers, avoid unnecessary extra temporary
-					// buffer space.
-					enc := base64.NewEncoder(base64.StdEncoding, buf)
-					if _, err := enc.Write(converted); err != nil {
-						return fmt.Errorf("failed to write base64 encoded bytes: %v", err)
-					}
-					if err := enc.Close(); err != nil {
-						return fmt.Errorf("failed to close base64 encoder: %v", err)
-					}
-				}
-				buf.WriteByte('"')
-			}
-		case map[string]interface{}:
-			str, err := protocol.EncodeJSONValue(converted, protocol.QuotedEscape)
+		// Handle special cases
+		var value interface{}
+		if fieldValue.Kind() == reflect.Struct {
+			nestedResult, err := marshalWithLocationName(fieldValue)
 			if err != nil {
-				return fmt.Errorf("unable to encode JSONValue, %v", err)
+				return nil, err
 			}
-			buf.WriteString(str)
-		default:
-			return fmt.Errorf("unsupported JSON value %v (%s)", value.Interface(), value.Type())
-		}
-	}
-	return nil
-}
-
-var hex = "0123456789abcdef"
-
-func writeString(s string, buf *bytes.Buffer) {
-	buf.WriteByte('"')
-	for i := 0; i < len(s); i++ {
-		if s[i] == '"' {
-			buf.WriteString(`\"`)
-		} else if s[i] == '\\' {
-			buf.WriteString(`\\`)
-		} else if s[i] == '\b' {
-			buf.WriteString(`\b`)
-		} else if s[i] == '\f' {
-			buf.WriteString(`\f`)
-		} else if s[i] == '\r' {
-			buf.WriteString(`\r`)
-		} else if s[i] == '\t' {
-			buf.WriteString(`\t`)
-		} else if s[i] == '\n' {
-			buf.WriteString(`\n`)
-		} else if s[i] < 32 {
-			buf.WriteString("\\u00")
-			buf.WriteByte(hex[s[i]>>4])
-			buf.WriteByte(hex[s[i]&0xF])
+			var nested interface{}
+			if err := json.Unmarshal(nestedResult, &nested); err != nil {
+				return nil, err
+			}
+			value = nested
 		} else {
-			buf.WriteByte(s[i])
+			switch val := fieldValue.Interface().(type) {
+			case float64:
+				if math.IsNaN(val) {
+					value = floatNaN
+				} else if math.IsInf(val, 1) {
+					value = floatInf
+				} else if math.IsInf(val, -1) {
+					value = floatNegInf
+				} else {
+					value = val
+				}
+			default:
+				value = val
+			}
 		}
+
+		result[name] = value
 	}
-	buf.WriteByte('"')
+
+	return json.Marshal(result)
 }
 
-// Returns the reflection element of a value, if it is a pointer.
-func elemOf(value reflect.Value) reflect.Value {
-	for value.Kind() == reflect.Ptr {
-		value = value.Elem()
+func isZeroValue(v reflect.Value) bool {
+	switch v.Kind() {
+	case reflect.Array, reflect.Map, reflect.Slice:
+		return v.Len() == 0
+	case reflect.String:
+		// For AWS compatibility, don't consider empty strings as zero values
+		// This means empty strings won't be omitted even with omitempty
+		return false
+	case reflect.Bool:
+		return !v.Bool()
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return v.Int() == 0
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return v.Uint() == 0
+	case reflect.Float32, reflect.Float64:
+		return v.Float() == 0
+	case reflect.Interface, reflect.Ptr:
+		return v.IsNil()
 	}
-	return value
+	return false
 }

@@ -7,19 +7,19 @@ import (
 // CPU represents CPU configuration
 type CPU struct {
 	Description   string `json:"description"`
-	NumberOfCores int    `json:"number_of_cores"`
+	NumberOfCores *int64 `json:"number_of_cores"`
 }
 
 // GPU represents GPU configuration
 type GPU struct {
 	Description  string `json:"description"`
-	NumberOfGPUs int    `json:"number_of_gpus"`
+	NumberOfGPUs *int64 `json:"number_of_gpus"`
 }
 
 // Memory represents memory configuration
 type Memory struct {
 	Description     string `json:"description"`
-	SizeInGigabytes int    `json:"size_in_gigabytes"`
+	SizeInGigabytes *int64 `json:"size_in_gigabytes"`
 }
 
 // Storage represents storage configuration
@@ -29,26 +29,28 @@ type Storage struct {
 
 // InstanceTypeResponse represents an instance type
 type InstanceTypeResponse struct {
-	BestFor         []string `json:"best_for"`
-	CPU             CPU      `json:"cpu"`
-	DeployWarning   string   `json:"deploy_warning"`
-	Description     string   `json:"description"`
-	GPU             GPU      `json:"gpu"`
-	GPUMemory       Memory   `json:"gpu_memory"`
-	ID              string   `json:"id"`
-	InstanceType    string   `json:"instance_type"`
-	Memory          Memory   `json:"memory"`
-	Model           string   `json:"model"`
-	Name            string   `json:"name"`
-	P2P             string   `json:"p2p"`
-	PricePerHour    string   `json:"price_per_hour"`
-	SpotPrice       string   `json:"spot_price"`
-	DynamicPrice    string   `json:"dynamic_price"`
-	MaxDynamicPrice string   `json:"max_dynamic_price"`
-	Storage         Storage  `json:"storage"`
-	Currency        string   `json:"currency"`
-	Manufacturer    string   `json:"manufacturer"`
-	DisplayName     string   `json:"display_name"`
+	BestFor             []string `json:"best_for"`
+	CPU                 CPU      `json:"cpu"`
+	DeployWarning       string   `json:"deploy_warning"`
+	Description         string   `json:"description"`
+	GPU                 GPU      `json:"gpu"`
+	GPUMemory           Memory   `json:"gpu_memory"`
+	ID                  string   `json:"id"`
+	InstanceType        string   `json:"instance_type"`
+	Memory              Memory   `json:"memory"`
+	Model               string   `json:"model"`
+	Name                string   `json:"name"`
+	P2P                 *string  `json:"p2p"`
+	PricePerHour        string   `json:"price_per_hour"`
+	SpotPrice           string   `json:"spot_price"`
+	DynamicPrice        string   `json:"dynamic_price"`
+	MaxDynamicPrice     string   `json:"max_dynamic_price"`
+	ServerlessPrice     string   `json:"serverless_price"`
+	ServerlessSpotPrice string   `json:"serverless_spot_price"`
+	Storage             Storage  `json:"storage"`
+	Currency            string   `json:"currency"`
+	Manufacturer        string   `json:"manufacturer"`
+	DisplayName         *string  `json:"display_name"`
 }
 
 // PriceHistoryEntry represents a single price history entry

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/dcerr"
 )
 
@@ -38,7 +39,7 @@ const (
 // Request is a simplified version focusing only on the essential functionality
 // for making HTTP requests with retry support.
 type Request struct {
-	Config   interface{} // Using interface{} to avoid import cycle
+	Config   datacrunch.Config // Using interface{} to avoid import cycle
 	Handlers Handlers
 
 	Retryer
@@ -72,7 +73,7 @@ type Operation struct {
 }
 
 // New creates a new Request pointer.
-func New(cfg interface{}, handlers Handlers, retryer Retryer, operation *Operation, params interface{}, data interface{}) *Request {
+func New(cfg datacrunch.Config, handlers Handlers, retryer Retryer, operation *Operation, params interface{}, data interface{}) *Request {
 	if retryer == nil {
 		retryer = noOpRetryer{}
 	}
@@ -87,56 +88,9 @@ func New(cfg interface{}, handlers Handlers, retryer Retryer, operation *Operati
 	// Extract BaseURL from config
 	baseURL := "https://api.datacrunch.io/v1"
 
-	// Try different config types
-	switch config := cfg.(type) {
-	case map[string]interface{}:
-		if url, exists := config["BaseURL"]; exists {
-			if str, ok := url.(string); ok {
-				baseURL = str
-			}
-		}
-	default:
-		// Use reflection to check for BaseURL field in any config struct
-		if cfgValue := reflect.ValueOf(cfg); cfgValue.IsValid() {
-			// Handle both struct and pointer to struct
-			if cfgValue.Kind() == reflect.Ptr && !cfgValue.IsNil() {
-				cfgValue = cfgValue.Elem()
-			}
-			if cfgValue.Kind() == reflect.Struct {
-				// Check for direct BaseURL field
-				if field := cfgValue.FieldByName("BaseURL"); field.IsValid() {
-					if field.Kind() == reflect.String {
-						if urlStr := field.String(); urlStr != "" {
-							baseURL = urlStr
-						}
-					} else if field.Kind() == reflect.Ptr && !field.IsNil() && field.Elem().Kind() == reflect.String {
-						// Handle *string (pointer to string)
-						if urlStr := field.Elem().String(); urlStr != "" {
-							baseURL = urlStr
-						}
-					}
-				} else {
-					// Check for Config.BaseURL pattern (for sessions)
-					if configField := cfgValue.FieldByName("Config"); configField.IsValid() {
-						if configField.Kind() == reflect.Ptr && !configField.IsNil() {
-							configValue := configField.Elem()
-							if baseURLField := configValue.FieldByName("BaseURL"); baseURLField.IsValid() {
-								if baseURLField.Kind() == reflect.String {
-									if urlStr := baseURLField.String(); urlStr != "" {
-										baseURL = urlStr
-									}
-								} else if baseURLField.Kind() == reflect.Ptr && !baseURLField.IsNil() && baseURLField.Elem().Kind() == reflect.String {
-									// Handle *string (pointer to string)
-									if urlStr := baseURLField.Elem().String(); urlStr != "" {
-										baseURL = urlStr
-									}
-								}
-							}
-						}
-					}
-				}
-			}
-		}
+	// Try to extract BaseURL from config
+	if cfg.BaseURL != nil {
+		baseURL = *cfg.BaseURL
 	}
 
 	var err error
@@ -279,7 +233,14 @@ func (r *Request) getNextRequestBody() (body io.ReadCloser, err error) {
 // DataFilled returns true if the request's data for response deserialization
 // target has been set and is a valid.
 func (r *Request) DataFilled() bool {
-	return r.Data != nil && reflect.ValueOf(r.Data).Elem().IsValid()
+	if r.Data == nil {
+		return false
+	}
+	v := reflect.ValueOf(r.Data)
+	if v.Kind() == reflect.Ptr {
+		return v.Elem().IsValid()
+	}
+	return v.IsValid()
 }
 
 // SetBufferBody sets the request's body bytes.

@@ -5,8 +5,8 @@ import (
 	"net/http"
 	"time"
 
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client/metadata"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/config"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
 )
 
@@ -24,7 +24,7 @@ type ResponseInterface interface {
 
 // A Config provides configuration to a service client instance.
 type Config struct {
-	Config   config.Config
+	Config   datacrunch.Config
 	BaseURL  string
 	Handlers request.Handlers
 	Timeout  time.Duration
@@ -33,7 +33,7 @@ type Config struct {
 // ConfigProvider provides a generic way for a service client to receive
 // the ClientConfig without circular dependencies.
 type ConfigProvider interface {
-	ClientConfig(serviceName string, cfgs ...*config.Config) Config
+	ClientConfig(serviceName string, cfgs ...*datacrunch.Config) Config
 }
 
 // ConfigNoResolveEndpointProvider same as ConfigProvider except it will not
@@ -49,12 +49,12 @@ type Client struct {
 	request.Retryer
 	metadata.ClientInfo
 
-	Config   config.Config
+	Config   datacrunch.Config
 	Handlers request.Handlers
 }
 
 // New will return a pointer to a new initialized service client.
-func New(cfg config.Config, info metadata.ClientInfo, handlers request.Handlers, options ...func(*Client)) *Client {
+func New(cfg datacrunch.Config, info metadata.ClientInfo, handlers request.Handlers, options ...func(*Client)) *Client {
 	svc := &Client{
 		Config:     cfg,
 		ClientInfo: info,

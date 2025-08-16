@@ -1,9 +1,9 @@
 package instance
 
 import (
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client/metadata"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/config"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/internal/protocol/restjson"
 )
@@ -29,26 +29,14 @@ var initClient func(*client.Client)
 var initRequest func(*request.Request)
 
 // New creates a new instance of the Instance client with a config provider.
-// If additional configuration is needed for the client instance use the optional
-// client.Config parameter to add your extra config.
-//
-// Example:
-//
-//	mySession := session.Must(session.New())
-//
-//	// Create a Instance client from just a session.
-//	svc := instance.New(mySession)
-//
-//	// Create a Instance client with additional configuration
-//	svc := instance.New(mySession, &client.Config{Timeout: 60 * time.Second})
-func New(p client.ConfigProvider, cfgs ...*config.Config) *Instance {
+func New(p client.ConfigProvider, cfgs ...*datacrunch.Config) *Instance {
 	c := p.ClientConfig(EndpointsID, cfgs...)
 
 	return newClient(c.Config, c.Handlers)
 }
 
 // newClient creates, initializes and returns a new service client instance.
-func newClient(cfg config.Config, handlers request.Handlers) *Instance {
+func newClient(cfg datacrunch.Config, handlers request.Handlers) *Instance {
 
 	svc := &Instance{
 		Client: client.New(cfg, metadata.ClientInfo{

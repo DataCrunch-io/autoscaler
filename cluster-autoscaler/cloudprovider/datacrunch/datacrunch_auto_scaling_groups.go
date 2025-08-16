@@ -44,19 +44,24 @@ func (m *autoScalingGroups) Register(asg *Asg) {
 	m.cacheMutex.Lock()
 	defer m.cacheMutex.Unlock()
 
+	klog.V(2).Infof("[DEBUG] Registering ASG in registry: %s (type=%s, min=%d, max=%d)",
+		asg.id, asg.instanceType, asg.minSize, asg.maxSize)
 	m.registeredAsgs = append(m.registeredAsgs, &asgInformation{
 		config: asg,
 	})
+	klog.V(2).Infof("[DEBUG] Total ASGs in registry: %d", len(m.registeredAsgs))
 }
 
 // FindForInstance returns Asg of the given Instance
-func (m *autoScalingGroups) FindForInstance(instanceId string) (*Asg, error) {
+func (m *autoScalingGroups) FindForInstance(hostname string) (*Asg, error) {
 	m.cacheMutex.Lock()
 	defer m.cacheMutex.Unlock()
-	if config, found := m.instanceToAsg[instanceId]; found {
+	klog.V(4).Infof("[DEBUG] Looking for ASG for instance hostname: %s", hostname)
+	if config, found := m.instanceToAsg[hostname]; found {
+		klog.V(4).Infof("[DEBUG] Found ASG %s for hostname %s in cache", config.id, hostname)
 		return config, nil
 	}
-	if _, found := m.instancesNotInManagedAsg[instanceId]; found {
+	if _, found := m.instancesNotInManagedAsg[hostname]; found {
 		// The instance is already known to not belong to any configured ASG
 		// Skip regenerateCache so that we won't unnecessarily call APIs
 		return nil, nil
@@ -64,11 +69,11 @@ func (m *autoScalingGroups) FindForInstance(instanceId string) (*Asg, error) {
 	if err := m.regenerateCache(); err != nil {
 		return nil, err
 	}
-	if config, found := m.instanceToAsg[instanceId]; found {
+	if config, found := m.instanceToAsg[hostname]; found {
 		return config, nil
 	}
 	// instance does not belong to any configured ASG
-	m.instancesNotInManagedAsg[instanceId] = struct{}{}
+	m.instancesNotInManagedAsg[hostname] = struct{}{}
 	return nil, nil
 }
 
@@ -76,13 +81,15 @@ func (m *autoScalingGroups) regenerateCache() error {
 	newCache := make(map[string]*Asg)
 
 	for _, asg := range m.registeredAsgs {
-		instances, err := m.manager.allInstances(asg.config.id)
+		instances, err := m.manager.allAsgRunningInstances(asg.config.id)
 		if err != nil {
 			return err
 		}
 		for _, instance := range instances {
-			if instance != nil {
-				newCache[instance.ID] = asg.config
+			if instance.Hostname != "" {
+				// Map by hostname, not instance ID, since lookups are by hostname
+				newCache[instance.Hostname] = asg.config
+				klog.V(5).Infof("[DEBUG] Cached mapping: hostname %s -> ASG %s", instance.Hostname, asg.config.id)
 			}
 		}
 	}

@@ -5,16 +5,17 @@ import (
 	"os"
 	"time"
 
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/config"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/credentials"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/defaults"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/internal/logger"
 )
 
 // Session provides a shared configuration and state for service clients
 type Session struct {
-	Config      *config.Config
+	Config      *datacrunch.Config
 	Handlers    request.Handlers
 	Credentials *credentials.Credentials
 }
@@ -34,15 +35,19 @@ type Options struct {
 	// Retry configuration
 	MaxRetries *int
 	Retryer    interface{}
+
+	// Logging configuration
+	Debug bool
 }
 
 // DefaultOptions returns default session options with sensible retry defaults
 func DefaultOptions() *Options {
 	defaultMaxRetries := 3 // Provide good defaults for all users
 	return &Options{
-		BaseURL:    defaults.DefaultBaseURL,
+		BaseURL:    "https://api.datacrunch.io/v1",
 		Timeout:    30 * time.Second,
 		MaxRetries: &defaultMaxRetries, // Default to 3 retries for resilience
+		Debug:      false,
 	}
 }
 
@@ -78,13 +83,17 @@ func New(options ...func(*Options)) *Session {
 		}
 	}
 
-	cfg := &config.Config{
+	cfg := &datacrunch.Config{
 		BaseURL:     &finalBaseURL,
 		Timeout:     &opts.Timeout,
 		MaxRetries:  opts.MaxRetries,
 		Retryer:     opts.Retryer,
 		Credentials: creds,
+		Debug:       opts.Debug,
 	}
+
+	// setup logger
+	logger.SetupFromConfig(cfg.Debug, nil)
 
 	return &Session{
 		Config:      cfg,
@@ -132,12 +141,13 @@ func NewFromEnv(options ...func(*Options)) *Session {
 	}
 
 	// Create session using the env-only credentials
-	cfg := &config.Config{
+	cfg := &datacrunch.Config{
 		BaseURL:     &opts.BaseURL,
 		Timeout:     &opts.Timeout,
 		MaxRetries:  opts.MaxRetries,
 		Retryer:     opts.Retryer,
 		Credentials: envCreds,
+		Debug:       opts.Debug,
 	}
 
 	return &Session{
@@ -202,8 +212,15 @@ func WithCredentialChainVerboseErrors(verbose bool) func(*Options) {
 	}
 }
 
+// WithDebug sets the debug mode
+func WithDebug(debug bool) func(*Options) {
+	return func(o *Options) {
+		o.Debug = debug
+	}
+}
+
 // ClientConfig implements the client.ConfigProvider interface
-func (s *Session) ClientConfig(serviceName string, cfgs ...*config.Config) client.Config {
+func (s *Session) ClientConfig(serviceName string, cfgs ...*datacrunch.Config) client.Config {
 	s = s.Copy(cfgs...)
 	return client.Config{
 		Config:   *s.Config,
@@ -212,7 +229,7 @@ func (s *Session) ClientConfig(serviceName string, cfgs ...*config.Config) clien
 	}
 }
 
-func (s *Session) Copy(cfgs ...*config.Config) *Session {
+func (s *Session) Copy(cfgs ...*datacrunch.Config) *Session {
 	newSession := &Session{
 		Config:   s.Config.Copy(cfgs...),
 		Handlers: s.Handlers.Copy(),
@@ -227,7 +244,7 @@ func initHandlers(s *Session) {
 }
 
 // ClientConfigNoResolveEndpoint implements the client.ConfigNoResolveEndpointProvider interface
-func (s *Session) ClientConfigNoResolveEndpoint(cfgs ...*interface{}) config.Config {
+func (s *Session) ClientConfigNoResolveEndpoint(cfgs ...*interface{}) datacrunch.Config {
 	return *s.Config
 }
 

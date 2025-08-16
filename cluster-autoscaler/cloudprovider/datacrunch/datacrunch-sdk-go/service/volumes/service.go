@@ -1,9 +1,9 @@
 package volumes
 
 import (
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/client/metadata"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/config"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/internal/protocol/restjson"
 )
@@ -40,13 +40,13 @@ var initRequest func(*request.Request)
 //
 //	// Create a Volumes client with additional configuration
 //	svc := volumes.New(mySession, &client.Config{Timeout: 60 * time.Second})
-func New(p client.ConfigProvider, cfgs ...*config.Config) *Volumes {
+func New(p client.ConfigProvider, cfgs ...*datacrunch.Config) *Volumes {
 	c := p.ClientConfig(EndpointsID, cfgs...)
 	return newClient(c.Config, c.Handlers)
 }
 
 // newClient creates, initializes and returns a new service client instance.
-func newClient(cfg config.Config, handlers request.Handlers) *Volumes {
+func newClient(cfg datacrunch.Config, handlers request.Handlers) *Volumes {
 
 	svc := &Volumes{
 		Client: client.New(cfg, metadata.ClientInfo{

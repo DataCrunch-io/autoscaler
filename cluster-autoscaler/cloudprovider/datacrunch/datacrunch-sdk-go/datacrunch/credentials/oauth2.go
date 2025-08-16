@@ -7,10 +7,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
 	"sync"
 	"time"
+
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/internal/logger"
 )
 
 // OAuth2Credentials represents OAuth2 client credentials with token caching
@@ -57,23 +58,23 @@ func (c *OAuth2Credentials) GetToken(ctx context.Context) (string, error) {
 
 	// If token is still valid, return it
 	if c.AccessToken != "" && time.Now().Before(c.Expiry.Add(-time.Minute)) {
-		log.Printf("Using cached token, expires at: %v", c.Expiry)
+		logger.Debug("Using cached token, expires at: %v", c.Expiry)
 		return c.AccessToken, nil
 	}
 
 	// If we have a refresh token, try to refresh
 	if c.RefreshToken != "" {
-		log.Printf("Attempting to refresh token")
+		logger.Debug("Attempting to refresh token")
 		var err error
 		if err = c.refreshWithRefreshToken(ctx); err == nil {
 			return c.AccessToken, nil
 		}
-		log.Printf("Refresh failed, falling back to client credentials: %v", err)
+		logger.Debug("Refresh failed, falling back to client credentials: %v", err)
 		// If refresh fails, fall back to client credentials
 	}
 
 	// Otherwise, get a new token using client credentials
-	log.Printf("Fetching new token using client credentials")
+	logger.Debug("Fetching new token using client credentials")
 	if err := c.fetchWithClientCredentials(ctx); err != nil {
 		return "", err
 	}
@@ -138,8 +139,8 @@ func (c *OAuth2Credentials) doTokenRequest(ctx context.Context, payload map[stri
 
 	body, _ := json.Marshal(payload)
 	endpoint := baseURL + "/oauth2/token"
-	log.Printf("Sending token request to %s", endpoint)
-	log.Printf("Request payload: %s", string(body))
+	logger.Debug("Sending token request to %s", endpoint)
+	logger.Debug("Request payload: %s", string(body))
 
 	req, err := http.NewRequestWithContext(ctx, "POST", endpoint, bytes.NewBuffer(body))
 	if err != nil {
@@ -154,7 +155,7 @@ func (c *OAuth2Credentials) doTokenRequest(ctx context.Context, payload map[stri
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("Failed to close response body: %v", err)
+			logger.Debug("Failed to close response body: %v", err)
 		}
 	}()
 
@@ -163,8 +164,7 @@ func (c *OAuth2Credentials) doTokenRequest(ctx context.Context, payload map[stri
 	if err != nil {
 		return err
 	}
-	log.Printf("Token response status: %d", resp.StatusCode)
-	log.Printf("Token response body: %s", string(respBody))
+	logger.Debug("Token response status: %d", resp.StatusCode)
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("token endpoint returned %d: %s", resp.StatusCode, string(respBody))
@@ -178,7 +178,7 @@ func (c *OAuth2Credentials) doTokenRequest(ctx context.Context, payload map[stri
 	c.AccessToken = tokenResp.AccessToken
 	c.RefreshToken = tokenResp.RefreshToken
 	c.Expiry = time.Now().Add(time.Duration(tokenResp.ExpiresIn) * time.Second)
-	log.Printf("Token obtained, expires in %d seconds", tokenResp.ExpiresIn)
+	logger.Debug("Token obtained, expires in %d seconds", tokenResp.ExpiresIn)
 
 	return nil
 }

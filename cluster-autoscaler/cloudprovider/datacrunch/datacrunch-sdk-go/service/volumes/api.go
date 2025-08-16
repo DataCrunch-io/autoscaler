@@ -1,9 +1,8 @@
 package volumes
 
 import (
-	"fmt"
-
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/request"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/internal/protocol/restjson"
 )
 
 // Instance represents an instance attached to a volume
@@ -35,7 +34,7 @@ type VolumeResponse struct {
 	Name                     string     `json:"name"`
 	CreatedAt                string     `json:"created_at"`
 	Status                   string     `json:"status"`
-	Size                     int        `json:"size"`
+	Size                     int64      `json:"size"`
 	IsOSVolume               bool       `json:"is_os_volume"`
 	Target                   string     `json:"target"`
 	Type                     string     `json:"type"`
@@ -57,7 +56,7 @@ type VolumeResponse struct {
 type CreateVolumeInput struct {
 	Type         string   `json:"type"`
 	LocationCode string   `json:"location_code"`
-	Size         int      `json:"size"`
+	Size         int64    `json:"size"`
 	InstanceID   string   `json:"instance_id,omitempty"`
 	InstanceIDs  []string `json:"instance_ids,omitempty"`
 	Name         string   `json:"name"`
@@ -67,7 +66,7 @@ type CreateVolumeInput struct {
 type VolumeActionInput struct {
 	Action       string   `json:"action"`
 	ID           string   `json:"id"`
-	Size         int      `json:"size,omitempty"`
+	Size         int64    `json:"size,omitempty"`
 	InstanceID   string   `json:"instance_id,omitempty"`
 	InstanceIDs  []string `json:"instance_ids,omitempty"`
 	Name         string   `json:"name,omitempty"`
@@ -76,8 +75,23 @@ type VolumeActionInput struct {
 	LocationCode string   `json:"location_code,omitempty"`
 }
 
+// VolumeStatus represents the possible status values for a volume.
+type VolumeStatus string
+
+const (
+	VolumeStatusOrdered   VolumeStatus = "ordered"
+	VolumeStatusAttached  VolumeStatus = "attached"
+	VolumeStatusAttaching VolumeStatus = "attaching"
+	VolumeStatusDetached  VolumeStatus = "detached"
+	VolumeStatusDeleted   VolumeStatus = "deleted"
+)
+
+type ListVolumesStatus struct {
+	Status VolumeStatus `json:"status"`
+}
+
 // ListVolumes lists all volumes
-func (c *Volumes) ListVolumes() ([]*VolumeResponse, error) {
+func (c *Volumes) ListVolumes(status *ListVolumesStatus) ([]*VolumeResponse, error) {
 	op := &request.Operation{
 		Name:       "ListVolumes",
 		HTTPMethod: "GET",
@@ -85,9 +99,13 @@ func (c *Volumes) ListVolumes() ([]*VolumeResponse, error) {
 	}
 
 	var volumes []*VolumeResponse
-	req := c.newRequest(op, nil, &volumes)
+	req := c.newRequest(op, status, &volumes)
 
 	return volumes, req.Send()
+}
+
+type GetVolumeInput struct {
+	ID string `location:"uri" locationName:"id"`
 }
 
 // GetVolume gets a volume by ID
@@ -95,11 +113,11 @@ func (c *Volumes) GetVolume(id string) (*VolumeResponse, error) {
 	op := &request.Operation{
 		Name:       "GetVolume",
 		HTTPMethod: "GET",
-		HTTPPath:   fmt.Sprintf("/volumes/%s", id),
+		HTTPPath:   "/volumes/{id}",
 	}
 
 	var volume VolumeResponse
-	req := c.newRequest(op, nil, &volume)
+	req := c.newRequest(op, &GetVolumeInput{ID: id}, &volume)
 
 	return &volume, req.Send()
 }
@@ -114,6 +132,9 @@ func (c *Volumes) CreateVolume(input *CreateVolumeInput) (string, error) {
 
 	var volumeID string
 	req := c.newRequest(op, input, &volumeID)
+
+	req.Handlers.Unmarshal.RemoveByName("datacrunchsdk.restjson.Unmarshal")
+	req.Handlers.Unmarshal.PushBackNamed(restjson.StringUnmarshalHandler)
 
 	return volumeID, req.Send()
 }
@@ -145,21 +166,19 @@ func (c *Volumes) ListTrashVolumes() ([]*VolumeResponse, error) {
 	return volumes, req.Send()
 }
 
+type DeleteVolumeInput struct {
+	ID string `location:"uri" locationName:"id"`
+}
+
 // DeleteVolume deletes a volume by ID
 func (c *Volumes) DeleteVolume(id string, isPermanent bool) error {
 	op := &request.Operation{
 		Name:       "DeleteVolume",
 		HTTPMethod: "DELETE",
-		HTTPPath:   fmt.Sprintf("/volumes/%s", id),
+		HTTPPath:   "/volumes/{id}",
 	}
 
-	input := struct {
-		IsPermanent bool `json:"is_permanent"`
-	}{
-		IsPermanent: isPermanent,
-	}
-
-	req := c.newRequest(op, input, nil)
+	req := c.newRequest(op, &DeleteVolumeInput{ID: id}, nil)
 
 	return req.Send()
 }

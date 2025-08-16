@@ -9,7 +9,7 @@ type StartScriptsAPI interface {
 	// ListStartScripts lists all startup scripts
 	ListStartScripts() ([]*startscripts.StartScriptResponse, error)
 	// GetStartScript gets a single startup script by ID
-	GetStartScript(id string) (*startscripts.StartScriptResponse, error)
+	GetStartScript(id string) ([]*startscripts.StartScriptResponse, error)
 	// CreateStartScript creates a new startup script
 	CreateStartScript(input *startscripts.CreateStartScriptInput) (string, error)
 	// DeleteStartScripts deletes multiple startup scripts
