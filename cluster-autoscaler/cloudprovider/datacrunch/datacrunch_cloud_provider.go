@@ -1,3 +1,19 @@
+/*
+Copyright 2019 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package datacrunch
 
 import (
@@ -21,8 +37,8 @@ import (
 
 const (
 	// GPULabel is the label added to nodes with GPU resource.
-	// pending to check
-	GPULabel = "datacrunch.io/type"
+	GPULabel       = "datacrunch.io/gpu-node"
+	nodeGroupLabel = "datacrunch.io/node-group"
 )
 
 // DatacrunchCloudProvider implements CloudProvider interface for DataCrunch
@@ -61,46 +77,59 @@ func (d *DatacrunchCloudProvider) NodeGroups() []cloudprovider.NodeGroup {
 	for _, asg := range d.manager.asgs.registeredAsgs {
 		groups = append(groups, asg.config)
 	}
-	klog.V(4).Infof("[DEBUG] NodeGroups() returning %d node groups", len(groups))
+	klog.Infof("[DEBUG] NodeGroups() returning %d node groups", len(groups))
 	for i, group := range groups {
-		klog.V(4).Infof("[DEBUG] NodeGroup %d: %s (min:%d, max:%d)", i+1, group.Id(), group.MinSize(), group.MaxSize())
+		klog.Infof("[DEBUG] NodeGroup %d: %s (min:%d, max:%d)", i+1, group.Id(), group.MinSize(), group.MaxSize())
 	}
 	return groups
 }
 
 // NodeGroupForNode returns the ASG for the given node
 func (d *DatacrunchCloudProvider) NodeGroupForNode(node *apiv1.Node) (cloudprovider.NodeGroup, error) {
-	klog.V(3).Infof("[DEBUG] NodeGroupForNode called for node: %s, providerID: %s", node.Name, node.Spec.ProviderID)
 	location, hostname, err := toInstanceIDAndHostname(node.Spec.ProviderID)
 	if err != nil {
-		klog.V(4).Infof("[DEBUG] Node %s does not belong to DataCrunch (invalid providerID format): %v", node.Name, err)
+		klog.Errorf("[DEBUG] Node %s does not belong to DataCrunch (invalid providerID format): %v", node.Name, err)
 		// Return nil, nil (not an error) when node doesn't belong to this cloud provider
 		return nil, nil
 	}
-	// find from cache will be faster need consider cache
-	// the instanceID can not be used due to create the nodegroup before create the instance?
-	// @todo to consider first
-	klog.V(3).Infof("[DEBUG] Found location: %s, hostname: %s for node %s", location, hostname, node.Name)
+
+	klog.Infof("[DEBUG] Found location: %s, hostname: %s for node %s", location, hostname, node.Name)
 
 	// Use the registry to find the ASG for this instance
 	asg, err := d.manager.GetAsgForInstanceByHostname(hostname)
 	if err != nil {
-		klog.V(3).Infof("[DEBUG] Error finding ASG for hostname %s: %v", hostname, err)
+		klog.Warningf("[DEBUG] Error finding ASG for hostname %s: %v", hostname, err)
 		return nil, err
 	}
+
 	if asg != nil {
-		klog.V(3).Infof("[DEBUG] Found ASG %s for node %s (hostname: %s)", asg.Id(), node.Name, hostname)
+		klog.Infof("[DEBUG] Found ASG %s for node %s (hostname: %s)", asg.Id(), node.Name, hostname)
 		return asg, nil
 	}
-	klog.V(3).Infof("[DEBUG] No ASG found for node %s (hostname: %s, location: %s)", node.Name, hostname, location)
 
-	klog.V(2).Infof("[DEBUG] No node group found for node: %s (providerID: %s)", node.Name, node.Spec.ProviderID)
+	klog.Warningf("[DEBUG] No ASG found for node %s (hostname: %s, location: %s)", node.Name, hostname, location)
 	return nil, nil
 }
 
 // HasInstance returns whether the given node has a corresponding instance in this cloud provider
 func (d *DatacrunchCloudProvider) HasInstance(node *apiv1.Node) (bool, error) {
-	return true, cloudprovider.ErrNotImplemented
+	_, hostname, err := toInstanceIDAndHostname(node.Spec.ProviderID)
+	if err != nil {
+		klog.Errorf("[DEBUG] Node %s does not belong to DataCrunch (invalid providerID format): %v", node.Name, err)
+		return false, nil
+	}
+
+	asg, err := d.manager.GetAsgForInstanceByHostname(hostname)
+	if err != nil {
+		klog.Warningf("[DEBUG] Error finding ASG for hostname %s: %v", hostname, err)
+		return false, err
+	}
+
+	if asg != nil {
+		return true, nil
+	}
+
+	return false, nil
 }
 
 // Pricing returns pricing model for this cloud provider or error if not available
@@ -110,10 +139,7 @@ func (d *DatacrunchCloudProvider) Pricing() (cloudprovider.PricingModel, errors.
 
 // GetAvailableMachineTypes get all machine types that can be requested from the cloud provider
 func (d *DatacrunchCloudProvider) GetAvailableMachineTypes() ([]string, error) {
-	// @todo need connect to call wrapper.GetAvailableMachineTypes()
-	// and the wrapper api will create a new list based on apis and with cache
-	// so the list will be expired after 10 minutes
-	return []string{}, nil
+	return d.manager.getAvailableMachineTypes()
 }
 
 // NewNodeGroup builds a theoretical ASG based on the node definition provided
@@ -129,19 +155,12 @@ func (d *DatacrunchCloudProvider) GetResourceLimiter() (*cloudprovider.ResourceL
 
 // GPULabel returns the label added to nodes with GPU resource
 func (d *DatacrunchCloudProvider) GPULabel() string {
-	return ""
+	return GPULabel
 }
 
 // GetAvailableGPUTypes return all available GPU types cloud provider supports
 func (d *DatacrunchCloudProvider) GetAvailableGPUTypes() map[string]struct{} {
-	// @todo need connect to call wrapper.GetAvailableGPUTypes()
-	// and the wrapper api will create a new list based on apis and with cache
-	// so the list will be expired after 10 minutes
-	return map[string]struct{}{
-		"1L40S.20V": {},
-		"A40.22V":   {},
-		"A6000.24V": {},
-	}
+	return d.manager.GetAvailableGPUTypes()
 }
 
 // GetNodeGpuConfig returns the label, type and resource name for the GPU added to node
@@ -165,47 +184,7 @@ func (d *DatacrunchCloudProvider) Cleanup() error {
 
 // Refresh is called before every main loop and can be used to dynamically update cloud provider state
 func (d *DatacrunchCloudProvider) Refresh() error {
-	klog.V(3).Info("[DEBUG] DataCrunch cloud provider refresh called - checking ASG states")
-
-	// Log current state of all ASGs
-	klog.V(3).Infof("[DEBUG] Refresh: Checking %d registered ASGs", len(d.manager.asgs.registeredAsgs))
-	for i, asg := range d.manager.asgs.registeredAsgs {
-		currentSize, err := d.manager.GetAsgSize(asg.config)
-		if err != nil {
-			klog.V(3).Infof("[DEBUG] Could not get size for ASG %d/%d %s: %v", i+1, len(d.manager.asgs.registeredAsgs), asg.config.id, err)
-		} else {
-			klog.V(3).Infof("[DEBUG] ASG %d/%d %s current state: size=%d, min=%d, max=%d, instanceType=%s",
-				i+1, len(d.manager.asgs.registeredAsgs), asg.config.id, currentSize, asg.config.minSize, asg.config.maxSize, asg.config.instanceType)
-
-			// Check if ASG is below minimum size and scale up if needed
-			if currentSize < int64(asg.config.minSize) {
-				needed := int64(asg.config.minSize) - currentSize
-				klog.V(2).Infof("[DEBUG] ⚠️  ASG %s is BELOW minimum size! Current: %d, Min: %d, Need to create: %d instances",
-					asg.config.id, currentSize, asg.config.minSize, needed)
-
-				// Scale up to meet minimum size
-				klog.V(2).Infof("[DEBUG] 🚀 Scaling ASG %s up to minimum size %d (adding %d instances)", asg.config.id, asg.config.minSize, needed)
-				err = d.manager.SetAsgSize(asg.config, int64(asg.config.minSize))
-				if err != nil {
-					klog.Errorf("[DEBUG] ❌ Failed to scale ASG %s to minimum size: %v", asg.config.id, err)
-				} else {
-					klog.V(2).Infof("[DEBUG] ✅ Successfully initiated scale-up for ASG %s to minimum size %d", asg.config.id, asg.config.minSize)
-				}
-			} else if currentSize == int64(asg.config.minSize) {
-				klog.V(3).Infof("[DEBUG] ✅ ASG %s is at minimum size: %d", asg.config.id, currentSize)
-			} else {
-				klog.V(3).Infof("[DEBUG] ASG %s is above minimum: current=%d, min=%d", asg.config.id, currentSize, asg.config.minSize)
-			}
-
-			// Also check if we have any nodes for this ASG
-			nodes, err := asg.config.Nodes()
-			if err != nil {
-				klog.V(3).Infof("[DEBUG] Error getting nodes for ASG %s: %v", asg.config.id, err)
-			} else {
-				klog.V(3).Infof("[DEBUG] ASG %s has %d nodes in Kubernetes", asg.config.id, len(nodes))
-			}
-		}
-	}
+	klog.Info("[DEBUG] DataCrunch cloud provider refresh called - checking ASG states")
 
 	return d.manager.Refresh()
 }
@@ -249,9 +228,9 @@ func BuildDatacrunch(
 }
 
 func (d *DatacrunchCloudProvider) addStaticASGs(asgSpecs []string, cfg *cloudConfig, kubeClient kubernetes.Interface) error {
-	klog.V(2).Infof("[DEBUG] Adding %d static ASG specifications", len(asgSpecs))
+	klog.Infof("[DEBUG] Adding %d static ASG specifications", len(asgSpecs))
 	for i, spec := range asgSpecs {
-		klog.V(2).Infof("[DEBUG] Processing ASG spec %d: %s", i+1, spec)
+		klog.Infof("[DEBUG] Processing ASG spec %d: %s", i+1, spec)
 		asgSpec, err := d.parseAsgSpec(spec)
 		if err != nil {
 			klog.Errorf("Failed to parse ASG spec: %v", err)
@@ -259,7 +238,7 @@ func (d *DatacrunchCloudProvider) addStaticASGs(asgSpecs []string, cfg *cloudCon
 		}
 
 		// Initialize ASG wrapper for this static group
-		klog.V(2).Infof("[DEBUG] Creating ASG: name=%s, min=%d, max=%d, type=%s",
+		klog.Infof("[DEBUG] Creating ASG: name=%s, min=%d, max=%d, type=%s",
 			asgSpec.name, asgSpec.minSize, asgSpec.maxSize, asgSpec.instanceType)
 		asg := &Asg{
 			manager:               d.manager,
@@ -271,26 +250,26 @@ func (d *DatacrunchCloudProvider) addStaticASGs(asgSpecs []string, cfg *cloudCon
 			AvailabilityLocations: cfg.AvailableLocations,
 		}
 		d.manager.RegisterAsg(asg)
-		klog.V(2).Infof("[DEBUG] Successfully registered ASG: %s", asgSpec.name)
+		klog.Infof("[DEBUG] Successfully registered ASG: %s", asgSpec.name)
 
 		// Check and enforce minimum size immediately after registration
 		currentSize, err := d.manager.GetAsgSize(asg)
 		if err != nil {
 			klog.Errorf("[DEBUG] Error getting size for newly registered ASG %s: %v", asg.id, err)
 		} else {
-			klog.V(2).Infof("[DEBUG] Newly registered ASG %s current size: %d, minimum size: %d", asg.id, currentSize, asg.minSize)
+			klog.Infof("[DEBUG] Newly registered ASG %s current size: %d, minimum size: %d", asg.id, currentSize, asg.minSize)
 			if currentSize < int64(asg.minSize) {
 				needed := int64(asg.minSize) - currentSize
-				klog.V(1).Infof("[DEBUG] 🚀 ASG %s is below minimum size at startup! Current: %d, Min: %d, scaling up by %d instances",
+				klog.Infof("[DEBUG] ASG %s is below minimum size at startup! Current: %d, Min: %d, scaling up by %d instances",
 					asg.id, currentSize, asg.minSize, needed)
 				err = d.manager.SetAsgSize(asg, int64(asg.minSize))
 				if err != nil {
-					klog.Errorf("[DEBUG] ❌ Failed to scale ASG %s to minimum size at startup: %v", asg.id, err)
+					klog.Errorf("[DEBUG] Failed to scale ASG %s to minimum size at startup: %v", asg.id, err)
 				} else {
-					klog.V(1).Infof("[DEBUG] ✅ Successfully initiated startup scale-up for ASG %s to minimum size %d", asg.id, asg.minSize)
+					klog.Infof("[DEBUG] Successfully initiated startup scale-up for ASG %s to minimum size %d", asg.id, asg.minSize)
 				}
 			} else {
-				klog.V(2).Infof("[DEBUG] ✅ ASG %s is already at or above minimum size (%d >= %d)", asg.id, currentSize, asg.minSize)
+				klog.Infof("[DEBUG] ASG %s is already at or above minimum size (%d >= %d)", asg.id, currentSize, asg.minSize)
 			}
 		}
 	}
@@ -299,7 +278,7 @@ func (d *DatacrunchCloudProvider) addStaticASGs(asgSpecs []string, cfg *cloudCon
 
 // parse format: min:max:instance-type:asg-name
 func (d *DatacrunchCloudProvider) parseAsgSpec(spec string) (*DatacrunchAsgSpec, error) {
-	klog.V(3).Infof("[DEBUG] Parsing ASG spec: %s", spec)
+	klog.Infof("[DEBUG] Parsing ASG spec: %s", spec)
 	parts := strings.Split(spec, ":")
 	if len(parts) != 4 {
 		klog.Errorf("[DEBUG] Invalid ASG spec format: expected 4 parts, got %d - %v", len(parts), parts)
@@ -324,7 +303,7 @@ func (d *DatacrunchCloudProvider) parseAsgSpec(spec string) (*DatacrunchAsgSpec,
 		return nil, fmt.Errorf("invalid ASG name: %s", asgName)
 	}
 
-	klog.V(3).Infof("[DEBUG] Parsed ASG spec successfully: min=%d, max=%d, instanceType=%s, name=%s",
+	klog.Infof("[DEBUG] Parsed ASG spec successfully: min=%d, max=%d, instanceType=%s, name=%s",
 		minSize, maxSize, instanceType, asgName)
 	return &DatacrunchAsgSpec{
 		minSize:      minSize,
@@ -350,7 +329,7 @@ func toInstanceIDAndHostname(providerID string) (string, string, error) {
 }
 
 func getKubeConfig(opts config.AutoscalingOptions) *rest.Config {
-	klog.V(1).Infof("Using kubeconfig file: %s", opts.KubeClientOpts.KubeConfigPath)
+	klog.Infof("Using kubeconfig file: %s", opts.KubeClientOpts.KubeConfigPath)
 	kubeConfig, err := clientcmd.BuildConfigFromFlags("", opts.KubeClientOpts.KubeConfigPath)
 	if err != nil {
 		klog.Fatalf("Failed to build kubeConfig: %v", err)

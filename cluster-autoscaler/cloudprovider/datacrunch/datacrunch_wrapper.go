@@ -1,3 +1,19 @@
+/*
+Copyright 2019 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package datacrunch
 
 import (
@@ -83,13 +99,13 @@ func (ia *customInstanceAvailability) GetInstanceAvailabilityLocation(instanceTy
 
 	instanceAvailabilityResponses, err := ia.ListInstanceAvailability()
 	if err != nil {
-		fmt.Printf("[DEBUG] Error fetching availability data: %v\n", err)
+		klog.Infof("[DEBUG] Error fetching availability data: %v\n", err)
 		return "", err
 	}
-	fmt.Printf("[DEBUG] All data: %v\n", instanceAvailabilityResponses)
+	klog.Infof("[DEBUG] All data: %v\n", instanceAvailabilityResponses)
 	// print all instance availability responses
 	for _, availabilityData := range instanceAvailabilityResponses {
-		klog.V(3).Infof("[DEBUG] Location: %s, Availabilities: %v", availabilityData.LocationCode, availabilityData.Availabilities)
+		klog.Infof("[DEBUG] Location: %s, Availabilities: %v", availabilityData.LocationCode, availabilityData.Availabilities)
 	}
 
 	// capticulate all available instance types
@@ -99,13 +115,13 @@ func (ia *customInstanceAvailability) GetInstanceAvailabilityLocation(instanceTy
 	}
 
 	for _, availabilityData := range instanceAvailabilityResponses {
-		klog.V(3).Infof("[DEBUG] Checking location %s", availabilityData.LocationCode)
+		klog.Infof("[DEBUG] Checking location %s", availabilityData.LocationCode)
 		if slices.Contains(newLocations, availabilityData.LocationCode) {
-			fmt.Printf("[DEBUG] Found matching location %s, checking %d available types\n", availabilityData.LocationCode, len(availabilityData.Availabilities))
+			klog.Infof("[DEBUG] Found matching location %s, checking %d available types\n", availabilityData.LocationCode, len(availabilityData.Availabilities))
 
 			for _, availability := range availabilityData.Availabilities {
 				if availability == instanceType {
-					fmt.Printf("[DEBUG] ✅ Instance type %s is AVAILABLE in location %s\n", instanceType, availabilityData.LocationCode)
+					klog.Infof("[DEBUG] Instance type %s is AVAILABLE in location %s\n", instanceType, availabilityData.LocationCode)
 					return availabilityData.LocationCode, nil
 				}
 			}
@@ -113,7 +129,7 @@ func (ia *customInstanceAvailability) GetInstanceAvailabilityLocation(instanceTy
 		}
 	}
 
-	fmt.Printf("[DEBUG] ❌ Location %s not found in availability data\n", newLocations)
+	klog.Infof("[DEBUG] Location %s not found in availability data\n", newLocations)
 	return "", nil
 }
 
@@ -122,30 +138,30 @@ func (ia *customInstanceAvailability) GetInstanceTypeDetails(instanceType string
 		return nil, fmt.Errorf("instance type is empty")
 	}
 
-	fmt.Printf("[DEBUG] Getting instance type details for %s\n", instanceType)
+	klog.Infof("[DEBUG] Getting instance type details for %s\n", instanceType)
 
 	instanceTypeDetails, err := ia.ListInstanceTypes()
 	if err != nil {
-		fmt.Printf("[DEBUG] Error fetching instance types: %v\n", err)
+		klog.Infof("[DEBUG] Error fetching instance types: %v\n", err)
 		return nil, err
 	}
 
-	fmt.Printf("[DEBUG] Received %d instance types from API for GetInstanceTypeDetails\n", len(instanceTypeDetails))
+	klog.Infof("[DEBUG] Received %d instance types from API for GetInstanceTypeDetails\n", len(instanceTypeDetails))
 
 	// Add detailed debugging for each instance type
 	for _, it := range instanceTypeDetails {
-		fmt.Printf("[DEBUG] Instance type %d: InstanceType='%s', Name='%s', ID='%s'\n",
+		klog.Infof("[DEBUG] Instance type %d: InstanceType='%s', Name='%s', ID='%s'\n",
 			it.InstanceType, it.Name, it.ID)
-		fmt.Printf("[DEBUG]   CPU: Cores=%v, Description='%s'\n",
+		klog.Infof("[DEBUG] cpu: cores=%v, Description='%s'\n",
 			safeDeref(it.CPU.NumberOfCores), it.CPU.Description)
-		fmt.Printf("[DEBUG]   Memory: GB=%v, Description='%s'\n",
+		klog.Infof("[DEBUG] memory: GB=%v, Description='%s'\n",
 			safeDeref(it.Memory.SizeInGigabytes), it.Memory.Description)
-		fmt.Printf("[DEBUG]   GPU: Count=%v, Description='%s'\n",
+		klog.Infof("[DEBUG] gpu: count=%v, Description='%s'\n",
 			safeDeref(it.GPU.NumberOfGPUs), it.GPU.Description)
 
 		// Look for your specific instance type
 		if it.InstanceType == instanceType {
-			fmt.Printf("[DEBUG] ✅ MATCH FOUND for %s: CPU=%v, Memory=%vGB, GPU=%v\n",
+			klog.Infof("[DEBUG] MATCH FOUND for %s: CPU=%v, Memory=%vGB, GPU=%v\n",
 				instanceType, safeDeref(it.CPU.NumberOfCores), safeDeref(it.Memory.SizeInGigabytes), safeDeref(it.GPU.NumberOfGPUs))
 			return &InstanceType{
 				CPU:    *it.CPU.NumberOfCores,
@@ -154,7 +170,7 @@ func (ia *customInstanceAvailability) GetInstanceTypeDetails(instanceType string
 			}, nil
 		}
 	}
-	klog.Errorf("[DEBUG] ❌ Instance type %s not found in API response\n", instanceType)
+	klog.Errorf("[DEBUG] Instance type %s not found in API response\n", instanceType)
 
 	return nil, fmt.Errorf("instance type %s not found", instanceType)
 }

@@ -1,3 +1,19 @@
+/*
+Copyright 2019 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package datacrunch
 
 import (
@@ -49,7 +65,7 @@ func setNodeProviderID(kubeClient kubernetes.Interface, nodeName string, value s
 		klog.Errorf("failed to update node's provider ID %s %+v", nodeName, err)
 		return err
 	}
-	klog.V(3).Infof("updated provider ID on node: %s", nodeName)
+	klog.Infof("updated provider ID on node: %s", nodeName)
 	return nil
 }
 
@@ -225,4 +241,10 @@ func formatValueWithStyle(value string, style quoteStyle) string {
 		// Provide a double-quoted fallback if the caller wants to force quoting.
 		return `"` + escapeDoubleQuotes(value) + `"`
 	}
+}
+
+// check if the node labels has given label and value
+func nodeHasLabel(node *v1.Node, label string, value string) bool {
+	_, hasGpuLabel := node.Labels[label]
+	return hasGpuLabel
 }

@@ -1,3 +1,19 @@
+/*
+Copyright 2019 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package datacrunch
 
 import (
@@ -91,6 +107,32 @@ func createDatacrunchManager(cloudReader io.Reader, kubeClient kubernetes.Interf
 
 // Refresh updates manager state before each main loop
 func (m *DatacrunchManager) Refresh() error {
+
+	for _, asg := range m.asgs.registeredAsgs {
+		currentSize, err := m.GetAsgSize(asg.config)
+		if err != nil {
+			klog.Warningf("[DEBUG] Error getting size for ASG %s: %v", asg.config.id, err)
+			continue
+		}
+		klog.Infof("[DEBUG] ASG %s current size: %d", asg.config.id, currentSize)
+
+		if currentSize < int64(asg.config.minSize) {
+			klog.Infof("[DEBUG] ASG %s is below minimum size: %d", asg.config.id, currentSize)
+			err = m.SetAsgSize(asg.config, int64(asg.config.minSize))
+			if err != nil {
+				klog.Warningf("[DEBUG] Error setting size for ASG %s: %v", asg.config.id, err)
+			}
+		} else if currentSize > int64(asg.config.maxSize) {
+			klog.Infof("[DEBUG] ASG %s is above maximum size: %d", asg.config.id, currentSize)
+			err = m.SetAsgSize(asg.config, int64(asg.config.maxSize))
+			if err != nil {
+				klog.Warningf("[DEBUG] Error setting size for ASG %s: %v", asg.config.id, err)
+			}
+		} else {
+			klog.Infof("[DEBUG] ASG %s is at desired size: %d", asg.config.id, currentSize)
+		}
+	}
+
 	return nil
 }
 
@@ -126,7 +168,7 @@ func (m *DatacrunchManager) GetAsgSize(asg *Asg) (int64, error) {
 	}
 	instances, err := m.allAsgRunningInstances(asg.id)
 	if err != nil {
-		klog.V(3).Infof("[DEBUG] Error getting instances for ASG %s: %v", asg.id, err)
+		klog.Warningf("[DEBUG] Error getting instances for ASG %s: %v", asg.id, err)
 		return -1, err
 	}
 
@@ -166,10 +208,10 @@ func (m *DatacrunchManager) SetAsgSize(asg *Asg, size int64) error {
 func (m *DatacrunchManager) GetAsgNodes(asg *Asg) ([]string, error) {
 	instances, err := m.allAsgRunningInstances(asg.id)
 	if err != nil {
-		klog.V(3).Infof("[DEBUG] Error getting instances for ASG %s nodes: %v", asg.id, err)
+		klog.Warningf("[DEBUG] Error getting instances for ASG %s nodes: %v", asg.id, err)
 		return nil, err
 	}
-	klog.V(4).Infof("[DEBUG] GetAsgNodes for %s: processing %d instances", asg.id, len(instances))
+	klog.Infof("[DEBUG] GetAsgNodes for %s: processing %d instances", asg.id, len(instances))
 	out := make([]string, 0, len(instances))
 	for _, inst := range instances {
 		// providerID format: datacrunch://<instance-id>/<hostname>
@@ -177,10 +219,10 @@ func (m *DatacrunchManager) GetAsgNodes(asg *Asg) ([]string, error) {
 		if inst.Hostname != "" {
 			providerID = providerID + "/" + inst.Hostname
 		}
-		klog.V(4).Infof("[DEBUG] ASG %s node: instanceID=%s, hostname=%s, providerID=%s", asg.id, inst.ID, inst.Hostname, providerID)
+		klog.Infof("[DEBUG] ASG %s node: instanceID=%s, hostname=%s, providerID=%s", asg.id, inst.ID, inst.Hostname, providerID)
 		out = append(out, providerID)
 	}
-	klog.V(4).Infof("[DEBUG] GetAsgNodes for %s: returning %d provider IDs", asg.id, len(out))
+	klog.Infof("[DEBUG] GetAsgNodes for %s: returning %d provider IDs", asg.id, len(out))
 	return out, nil
 }
 
@@ -244,12 +286,12 @@ func (m *DatacrunchManager) getAsgTemplate(asgId string) (*asgTemplate, error) {
 
 // buildNodeFromTemplate builds a Kubernetes node from ASG template
 func (m *DatacrunchManager) buildNodeFromTemplate(asg *Asg, template *asgTemplate) (*apiv1.Node, error) {
-	klog.V(4).Infof("[DEBUG] buildNodeFromTemplate for ASG %s: CPU=%d, Memory=%d, GPU=%d",
+	klog.Infof("[DEBUG] buildNodeFromTemplate for ASG %s: CPU=%d, Memory=%d, GPU=%d",
 		asg.id, template.InstanceType.CPU, template.InstanceType.Memory, template.InstanceType.GPU)
 
 	node := &apiv1.Node{}
 	nodeName := fmt.Sprintf("%s-asg-%d", asg.id, rand.Int63())
-	klog.V(4).Infof("[DEBUG] Generated template node name: %s", nodeName)
+	klog.Infof("[DEBUG] Generated template node name: %s", nodeName)
 
 	node.ObjectMeta = metav1.ObjectMeta{
 		Name: nodeName,
@@ -264,7 +306,7 @@ func (m *DatacrunchManager) buildNodeFromTemplate(asg *Asg, template *asgTemplat
 
 	// Set node capacity and allocatable based on instance type
 	memoryGi := template.InstanceType.Memory / 1024 / 1024 / 1024
-	klog.V(4).Infof("[DEBUG] Setting node capacity: CPU=%d, Memory=%dGi, Pods=110", template.InstanceType.CPU, memoryGi)
+	klog.Infof("[DEBUG] Setting node capacity: CPU=%d, Memory=%dGi, Pods=110", template.InstanceType.CPU, memoryGi)
 	capacity := apiv1.ResourceList{
 		apiv1.ResourcePods:   resource.MustParse("110"),
 		apiv1.ResourceCPU:    resource.MustParse(fmt.Sprintf("%d", template.InstanceType.CPU)),
@@ -273,10 +315,10 @@ func (m *DatacrunchManager) buildNodeFromTemplate(asg *Asg, template *asgTemplat
 
 	// Add GPU resources if available
 	if template.InstanceType.GPU > 0 {
-		klog.V(3).Infof("[DEBUG] Adding GPU resources: %d nvidia.com/gpu", template.InstanceType.GPU)
+		klog.Infof("[DEBUG] Adding GPU resources: %d nvidia.com/gpu", template.InstanceType.GPU)
 		capacity["nvidia.com/gpu"] = resource.MustParse(fmt.Sprintf("%d", template.InstanceType.GPU))
 	} else {
-		klog.V(4).Infof("[DEBUG] No GPU resources for instance type %s", asg.instanceType)
+		klog.Infof("[DEBUG] No GPU resources for instance type %s", asg.instanceType)
 	}
 
 	node.Status = apiv1.NodeStatus{
@@ -290,8 +332,7 @@ func (m *DatacrunchManager) buildNodeFromTemplate(asg *Asg, template *asgTemplat
 		node.Labels[key] = value
 	}
 
-	klog.V(4).Infof("[DEBUG] Template node created successfully for ASG %s: %s", asg.id, nodeName)
-	klog.V(5).Infof("[DEBUG] Template node labels: %v", node.Labels)
+	klog.Infof("[DEBUG] Template node created successfully for ASG %s: %s", asg.id, nodeName)
 	return node, nil
 }
 
@@ -301,7 +342,7 @@ func (m *DatacrunchManager) scaleUpAsg(asg *Asg, count int) error {
 		return nil
 	}
 
-	klog.V(2).Infof("Scaling up ASG %s by %d instances", asg.id, count)
+	klog.Infof("Scaling up ASG %s by %d instances", asg.id, count)
 
 	// Get node configuration for this ASG
 	nodeConfig, err := m.getNodeConfigForAsg(asg)
@@ -336,10 +377,10 @@ func (m *DatacrunchManager) scaleUpAsg(asg *Asg, count int) error {
 			return fmt.Errorf("failed to create instance %d: %v", i, err)
 		}
 		createdInstances = append(createdInstances, instanceID)
-		klog.V(3).Infof("Successfully created instance %s for ASG %s", instanceID, asg.id)
+		klog.Infof("Successfully created instance %s for ASG %s", instanceID, asg.id)
 	}
 
-	klog.V(2).Infof("Successfully scaled up ASG %s by %d instances", asg.id, count)
+	klog.Infof("Successfully scaled up ASG %s by %d instances", asg.id, count)
 	return nil
 }
 
@@ -349,7 +390,7 @@ func (m *DatacrunchManager) scaleDownAsg(asg *Asg, count int) error {
 		return nil
 	}
 
-	klog.V(2).Infof("Scaling down ASG %s by %d instances", asg.id, count)
+	klog.Infof("Scaling down ASG %s by %d instances", asg.id, count)
 
 	// Get current instances
 	instances, err := m.dcService.GetAllInstancesByDescription(asg.id)
@@ -381,7 +422,7 @@ func (m *DatacrunchManager) scaleDownAsg(asg *Asg, count int) error {
 			continue
 		}
 		deletedCount++
-		klog.V(3).Infof("Successfully deleted instance %s from ASG %s", instanceID, asg.id)
+		klog.Infof("Successfully deleted instance %s from ASG %s", instanceID, asg.id)
 	}
 
 	if deletedCount == 0 {
@@ -392,7 +433,7 @@ func (m *DatacrunchManager) scaleDownAsg(asg *Asg, count int) error {
 		klog.Warningf("Only deleted %d out of %d requested instances from ASG %s", deletedCount, count, asg.id)
 	}
 
-	klog.V(2).Infof("Successfully scaled down ASG %s by %d instances", asg.id, deletedCount)
+	klog.Infof("Successfully scaled down ASG %s by %d instances", asg.id, deletedCount)
 	return nil
 }
 
@@ -437,18 +478,18 @@ func (m *DatacrunchManager) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 	// Generate unique hostname
 	// asgname + location + timestamp
 	hostname := strings.ReplaceAll(fmt.Sprintf("%s-%s-%d", asg.id, location, time.Now().Unix()), ".", "-")
-	klog.V(3).Infof("[DEBUG] createInstanceForAsg: ASG=%s, instanceType=%s, location=%s, hostname=%s",
+	klog.Infof("[DEBUG] createInstanceForAsg: ASG=%s, instanceType=%s, location=%s, hostname=%s",
 		asg.id, asg.instanceType, location, hostname)
 
 	// Create or get startup script ID
 	providerID := fmt.Sprintf("datacrunch://%s/%s", location, asg.id)
-	klog.V(3).Infof("[DEBUG] Creating startup script for ASG %s", asg.id)
+	klog.Infof("[DEBUG] Creating startup script for ASG %s", asg.id)
 	startupScriptID, err := m.createOrGetStartupScript(asg, nodeConfig, providerID)
 	if err != nil {
 		klog.Errorf("[DEBUG] Failed to create startup script for ASG %s: %v", asg.id, err)
 		return "", hostname, fmt.Errorf("failed to create startup script: %v", err)
 	}
-	klog.V(3).Infof("[DEBUG] Startup script created with ID: '%s'", startupScriptID)
+	klog.Infof("[DEBUG] Startup script created with ID: '%s'", startupScriptID)
 
 	// Check if startup script ID is empty
 	if startupScriptID == "" {
@@ -459,21 +500,21 @@ func (m *DatacrunchManager) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 	// Determine image to use based on instance type
 	var image string
 	isGPU := isGPUInstanceType(asg.instanceType)
-	klog.V(3).Infof("[DEBUG] Instance type %s detected as GPU: %t", asg.instanceType, isGPU)
+	klog.Infof("[DEBUG] Instance type %s detected as GPU: %t", asg.instanceType, isGPU)
 	if isGPU {
 		image = m.cfg.Image.GPU
 		if image == "" {
 			klog.Errorf("[DEBUG] No GPU image configured for instance type %s", asg.instanceType)
 			return "", hostname, fmt.Errorf("no GPU image configured for instance type %s", asg.instanceType)
 		}
-		klog.V(3).Infof("[DEBUG] Using GPU image: %s", image)
+		klog.Infof("[DEBUG] Using GPU image: %s", image)
 	} else {
 		image = m.cfg.Image.CPU
 		if image == "" {
 			klog.Errorf("[DEBUG] No CPU image configured for instance type %s", asg.instanceType)
 			return "", hostname, fmt.Errorf("no CPU image configured for instance type %s", asg.instanceType)
 		}
-		klog.V(3).Infof("[DEBUG] Using CPU image: %s", image)
+		klog.Infof("[DEBUG] Using CPU image: %s", image)
 	}
 
 	// Create the instance input with all required fields
@@ -510,12 +551,12 @@ func (m *DatacrunchManager) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 	}
 
 	// Create the instance
-	klog.V(2).Infof("[DEBUG] Creating DataCrunch instance: hostname=%s, type=%s, image=%s, location=%s, contract=%s, pricing=%s",
+	klog.Infof("[DEBUG] Creating DataCrunch instance: hostname=%s, type=%s, image=%s, location=%s, contract=%s, pricing=%s",
 		hostname, asg.instanceType, image, location, m.cfg.BillingConfig.Contract, m.cfg.BillingConfig.Price)
 
 	// Debug: Log full request body
 	if requestBody, err := json.MarshalIndent(input, "", "  "); err == nil {
-		klog.V(3).Infof("[DEBUG] CreateInstance request body:\n%s", string(requestBody))
+		klog.Infof("[DEBUG] CreateInstance request body:\n%s", string(requestBody))
 	}
 
 	instanceID, err := m.dcService.CreateInstance(&input)
@@ -524,7 +565,7 @@ func (m *DatacrunchManager) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 		return "", hostname, fmt.Errorf("failed to create instance: %v", err)
 	}
 
-	klog.V(2).Infof("[DEBUG] DataCrunch instance created successfully: ID=%s, hostname=%s", instanceID, hostname)
+	klog.Infof("[DEBUG] DataCrunch instance created successfully: ID=%s, hostname=%s", instanceID, hostname)
 	return instanceID, hostname, nil
 }
 
@@ -539,7 +580,7 @@ func isGPUInstanceType(instanceType string) bool {
 func (m *DatacrunchManager) createOrGetStartupScript(asg *Asg, nodeConfig *nodeConfig, providerID string) (string, error) {
 	scriptName := fmt.Sprintf("autoscaler-%s", asg.id)
 	// Create new startup script
-	klog.V(3).Infof("Creating new startup script %s", scriptName)
+	klog.Infof("Creating new startup script %s", scriptName)
 	// decode the base64 and stringify to text utf8 encoded  new line "\n"
 	_base64Script, err := base64.StdEncoding.DecodeString(nodeConfig.StartupScript)
 	if err != nil {
@@ -559,7 +600,7 @@ func (m *DatacrunchManager) createOrGetStartupScript(asg *Asg, nodeConfig *nodeC
 		Script: _scriptsUtf8,
 	}
 	if inputJSON, err := json.MarshalIndent(input, "", "  "); err == nil {
-		klog.V(3).Infof("[DEBUG] CreateStartScript request body:\n%s", string(inputJSON))
+		klog.Infof("[DEBUG] CreateStartScript request body:\n%s", string(inputJSON))
 	}
 
 	scriptID, err := m.dcService.CreateStartScript(input)
@@ -568,9 +609,9 @@ func (m *DatacrunchManager) createOrGetStartupScript(asg *Asg, nodeConfig *nodeC
 		return "", fmt.Errorf("failed to create startup script: %v", err)
 	}
 
-	klog.V(3).Infof("[DEBUG] CreateStartScript response - scriptID: '%s'", scriptID)
+	klog.Infof("[DEBUG] CreateStartScript response - scriptID: '%s'", scriptID)
 
-	klog.V(3).Infof("Created startup script %s with ID %s", scriptName, scriptID)
+	klog.Infof("Created startup script %s with ID %s", scriptName, scriptID)
 	return scriptID, nil
 }
 
@@ -584,18 +625,49 @@ func (m *DatacrunchManager) cleanupCreatedInstances(instanceIDs []string) {
 		if err != nil {
 			klog.Errorf("Failed to cleanup instance %s: %v", instanceID, err)
 		} else {
-			klog.V(3).Infof("Cleaned up instance %s", instanceID)
+			klog.Infof("Cleaned up instance %s", instanceID)
 		}
 	}
 }
 
 func (m *DatacrunchManager) instanceTypeAvailableLocation(instanceType string, locations []string) (string, error) {
-	klog.V(3).Infof("[DEBUG] Checking instance availability: instanceType=%s, locations=%s", instanceType, locations)
+	klog.Infof("[DEBUG] Checking instance availability: instanceType=%s, locations=%s", instanceType, locations)
 	location, err := m.dcService.GetInstanceAvailabilityLocation(instanceType, locations)
 	if err != nil {
 		klog.Errorf("[DEBUG] Error checking availability for %s in %s: %v", instanceType, locations, err)
 		return "", err
 	}
-	klog.V(3).Infof("[DEBUG] Instance type %s is available in location %s", instanceType, location)
+	klog.Infof("[DEBUG] Instance type %s is available in location %s", instanceType, location)
 	return location, nil
+}
+
+func (m *DatacrunchManager) getAvailableMachineTypes() ([]string, error) {
+	instanceTypes, err := m.dcService.ListInstanceTypes()
+	if err != nil {
+		return nil, err
+	}
+
+	types := make([]string, len(instanceTypes))
+	for _, it := range instanceTypes {
+		types = append(types, it.InstanceType)
+	}
+	return types, nil
+}
+
+func (m *DatacrunchManager) GetAvailableGPUTypes() map[string]struct{} {
+	instanceTypes, err := m.dcService.ListInstanceTypes()
+	if err != nil {
+		return nil
+	}
+
+	types := make(map[string]struct{}, len(instanceTypes))
+	for _, it := range instanceTypes {
+		// if it.InstanceType start with "CPU."
+		if strings.HasPrefix(strings.ToUpper(it.InstanceType), "CPU.") {
+			continue
+		}
+		types[it.InstanceType] = struct{}{}
+	}
+
+	return types
 }

@@ -1,3 +1,19 @@
+/*
+Copyright 2019 The Kubernetes Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+
 package datacrunch
 
 import (
@@ -44,21 +60,21 @@ func (m *autoScalingGroups) Register(asg *Asg) {
 	m.cacheMutex.Lock()
 	defer m.cacheMutex.Unlock()
 
-	klog.V(2).Infof("[DEBUG] Registering ASG in registry: %s (type=%s, min=%d, max=%d)",
+	klog.Infof("[DEBUG] Registering ASG in registry: %s (type=%s, min=%d, max=%d)",
 		asg.id, asg.instanceType, asg.minSize, asg.maxSize)
 	m.registeredAsgs = append(m.registeredAsgs, &asgInformation{
 		config: asg,
 	})
-	klog.V(2).Infof("[DEBUG] Total ASGs in registry: %d", len(m.registeredAsgs))
+	klog.Infof("[DEBUG] Total ASGs in registry: %d", len(m.registeredAsgs))
 }
 
 // FindForInstance returns Asg of the given Instance
 func (m *autoScalingGroups) FindForInstance(hostname string) (*Asg, error) {
 	m.cacheMutex.Lock()
 	defer m.cacheMutex.Unlock()
-	klog.V(4).Infof("[DEBUG] Looking for ASG for instance hostname: %s", hostname)
+	klog.Infof("[DEBUG] Looking for ASG for instance hostname: %s", hostname)
 	if config, found := m.instanceToAsg[hostname]; found {
-		klog.V(4).Infof("[DEBUG] Found ASG %s for hostname %s in cache", config.id, hostname)
+		klog.Infof("[DEBUG] Found ASG %s for hostname %s in cache", config.id, hostname)
 		return config, nil
 	}
 	if _, found := m.instancesNotInManagedAsg[hostname]; found {
@@ -89,7 +105,7 @@ func (m *autoScalingGroups) regenerateCache() error {
 			if instance.Hostname != "" {
 				// Map by hostname, not instance ID, since lookups are by hostname
 				newCache[instance.Hostname] = asg.config
-				klog.V(5).Infof("[DEBUG] Cached mapping: hostname %s -> ASG %s", instance.Hostname, asg.config.id)
+				klog.Infof("[DEBUG] Cached mapping: hostname %s -> ASG %s", instance.Hostname, asg.config.id)
 			}
 		}
 	}
