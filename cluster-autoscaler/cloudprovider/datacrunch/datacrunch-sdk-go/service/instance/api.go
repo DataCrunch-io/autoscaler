@@ -135,6 +135,21 @@ const (
 	InstanceStatusValidating   InstanceStatus = "validating"
 )
 
+type BillingContract string
+
+const (
+	BillingContractPayAsYouGo BillingContract = "PAY_AS_YOU_GO"
+	BillingContractLongTerm   BillingContract = "LONG_TERM"
+	BillingContractSpot       BillingContract = "SPOT"
+)
+
+type BillingPrice string
+
+const (
+	BillingPriceDynamic BillingPrice = "DYNAMIC_PRICE"
+	BillingPriceFixed   BillingPrice = "FIXED_PRICE"
+)
+
 // ListInstancesInput represents the input for listing instances
 type ListInstancesInput struct {
 	Status string `location:"querystring" locationName:"status"`

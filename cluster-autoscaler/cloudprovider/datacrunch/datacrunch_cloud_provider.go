@@ -185,8 +185,9 @@ func (d *DatacrunchCloudProvider) Cleanup() error {
 // Refresh is called before every main loop and can be used to dynamically update cloud provider state
 func (d *DatacrunchCloudProvider) Refresh() error {
 	klog.Info("[DEBUG] DataCrunch cloud provider refresh called - checking ASG states")
+	return nil
 
-	return d.manager.Refresh()
+	// return d.manager.Refresh()
 }
 
 // BuildDatacrunchCloudProvider builds the DataCrunch cloud provider.
@@ -323,7 +324,7 @@ func toInstanceIDAndHostname(providerID string) (string, string, error) {
 	_providerID := strings.TrimPrefix(providerID, datacrunchProviderIDPrefix)
 	parts := strings.Split(_providerID, "/")
 	if len(parts) < 2 {
-		return parts[0], "", nil
+		return "", "", fmt.Errorf("invalid providerID format: %s", providerID)
 	}
 	return parts[0], parts[1], nil
 }

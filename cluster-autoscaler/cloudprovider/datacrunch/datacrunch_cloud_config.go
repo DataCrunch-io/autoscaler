@@ -26,7 +26,7 @@ type cloudConfig struct {
 	Image              imageConfig        `json:"image"`
 	SSHKeyIDs          []string           `json:"sshKeyIDs"`
 	BillingConfig      billingConfig      `json:"billingConfig"`
-	Labels             labelConfig        `json:"labels"`
+	Labels             []string           `json:"labels"`
 	Debug              bool               `json:"debug"`
 	AvailableLocations []string           `json:"availableLocations"`
 	StartupScript      string             `json:"startupScript"`     // base64 encoded, required
@@ -39,12 +39,6 @@ type cloudConfig struct {
 type imageConfig struct {
 	GPU string `json:"gpu"`
 	CPU string `json:"cpu"`
-}
-
-// labelConfig holds GPU and CPU specific labels
-type labelConfig struct {
-	GPU map[string]string `json:"gpu"`
-	CPU map[string]string `json:"cpu"`
 }
 
 // billingConfig holds billing-related configuration
@@ -60,7 +54,7 @@ type nodeConfig struct {
 	StartupScript string             // optional override for startup script
 	SSHKeyIDs     []string           // optional override for SSH keys
 	OSVolumeSize  int                // in GB, default is 100GB
-	Labels        map[string]string  // optional override for labels
+	Labels        []string           // optional override for labels
 	Volumes       []additionalVolume // optional additional volumes
 	Taints        []apiv1.Taint      // optional taints
 	Contract      string             // optional override for contract
@@ -86,16 +80,6 @@ func (cfg *cloudConfig) isValid() bool {
 		return false
 	}
 
-	// Validate billing config
-	if cfg.BillingConfig.Contract == "" {
-		klog.Errorf("BillingConfig.Contract is required")
-		return false
-	}
-	if cfg.BillingConfig.Price == "" {
-		klog.Errorf("BillingConfig.Price is required")
-		return false
-	}
-
 	// Validate startup script is provided
 	if cfg.StartupScript == "" {
 		klog.Errorf("StartupScript is required")
@@ -111,12 +95,6 @@ func (cfg *cloudConfig) isValid() bool {
 	// Validate debug is a boolean
 	if cfg.Debug != true && cfg.Debug != false {
 		klog.Errorf("Debug must be a boolean")
-		return false
-	}
-
-	// Validate labels config - at least one set should be provided
-	if len(cfg.Labels.GPU) == 0 && len(cfg.Labels.CPU) == 0 {
-		klog.Errorf("At least one label set (GPU or CPU) must be specified")
 		return false
 	}
 

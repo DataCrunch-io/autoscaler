@@ -21,6 +21,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"regexp"
 	"strings"
 
@@ -247,4 +248,19 @@ func formatValueWithStyle(value string, style quoteStyle) string {
 func nodeHasLabel(node *v1.Node, label string, value string) bool {
 	_, hasGpuLabel := node.Labels[label]
 	return hasGpuLabel
+}
+
+func convertConfigLabelsToK8sLabels(labels []string, asg *Asg) string {
+	if asg == nil {
+		return ""
+	}
+	if len(labels) == 0 {
+		labels = make([]string, 2)
+	}
+
+	labels = append(labels, fmt.Sprintf("%s=%s", GPULabel, asg.instanceType))
+	labels = append(labels, fmt.Sprintf("%s=%s", nodeGroupLabel, asg.id))
+
+	_k8sLabels := strings.Join(labels, ",")
+	return _k8sLabels
 }

@@ -76,6 +76,8 @@ func createDatacrunchManager(cloudReader io.Reader, kubeClient kubernetes.Interf
 		return nil, errors.New("please check whether you have provided correct AccessKeyId,AccessKeySecret,RegionId or STS Token")
 	}
 
+	cfg = verifyCloudConfigAndPatch(cfg)
+
 	// create the sdk provider
 	sdkProvider, err := createDatacrunchSDKProvider(cfg)
 	if err != nil {
@@ -233,6 +235,11 @@ func (m *DatacrunchManager) RegisterAsg(asg *Asg) {
 
 // GetAsgForInstance returns ASG that owns the instance by matching Description
 func (m *DatacrunchManager) GetAsgForInstanceByHostname(hostname string) (*Asg, error) {
+	if hostname == "" {
+		return nil, errors.New("hostname is required")
+	}
+
+	// find from cache first
 	return m.asgs.FindForInstance(hostname)
 }
 
@@ -437,16 +444,35 @@ func (m *DatacrunchManager) scaleDownAsg(asg *Asg, count int) error {
 	return nil
 }
 
+func verifyCloudConfigAndPatch(cfg *cloudConfig) *cloudConfig {
+
+	if cfg.BillingConfig.Contract == "" {
+		cfg.BillingConfig.Contract = string(instance.BillingContractPayAsYouGo)
+	}
+	if cfg.BillingConfig.Price == "" {
+		cfg.BillingConfig.Price = string(instance.BillingPriceDynamic)
+	}
+	return cfg
+}
+
 // getNodeConfigForAsg retrieves the node configuration for an ASG using global config
 func (m *DatacrunchManager) getNodeConfigForAsg(asg *Asg) (*nodeConfig, error) {
 	// Create a nodeConfig from global cloudConfig for this ASG
+	isGPU := isGPUInstanceType(asg.instanceType)
+	var image string
+	if isGPU {
+		image = m.cfg.Image.GPU
+	} else {
+		image = m.cfg.Image.CPU
+	}
+
 	nodeConfig := &nodeConfig{
-		IsSpot:        false, // Default to non-spot
-		Image:         "",    // Will be resolved based on instance type
+		IsSpot:        m.cfg.BillingConfig.Contract == string(instance.BillingContractSpot), // Default to non-spot
+		Image:         image,
 		StartupScript: m.cfg.StartupScript,
 		SSHKeyIDs:     m.cfg.SSHKeyIDs,
 		OSVolumeSize:  100, // Default 100GB
-		Labels:        make(map[string]string),
+		Labels:        m.cfg.Labels,
 		Volumes:       make([]additionalVolume, len(m.cfg.AdditionalVolumes)),
 		Taints:        make([]apiv1.Taint, len(m.cfg.Taints)),
 		Contract:      m.cfg.BillingConfig.Contract,
@@ -463,13 +489,6 @@ func (m *DatacrunchManager) getNodeConfigForAsg(asg *Asg) (*nodeConfig, error) {
 		nodeConfig.Taints[i] = taint
 	}
 
-	// Determine labels based on instance type
-	if isGPUInstanceType(asg.instanceType) {
-		nodeConfig.Labels = m.cfg.Labels.GPU
-	} else {
-		nodeConfig.Labels = m.cfg.Labels.CPU
-	}
-
 	return nodeConfig, nil
 }
 
@@ -482,20 +501,26 @@ func (m *DatacrunchManager) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 		asg.id, asg.instanceType, location, hostname)
 
 	// Create or get startup script ID
-	providerID := fmt.Sprintf("datacrunch://%s/%s", location, asg.id)
-	klog.Infof("[DEBUG] Creating startup script for ASG %s", asg.id)
+	providerID := fmt.Sprintf("datacrunch://%s/%s", location, hostname)
 	startupScriptID, err := m.createOrGetStartupScript(asg, nodeConfig, providerID)
 	if err != nil {
 		klog.Errorf("[DEBUG] Failed to create startup script for ASG %s: %v", asg.id, err)
-		return "", hostname, fmt.Errorf("failed to create startup script: %v", err)
+		return "", hostname, err
 	}
 	klog.Infof("[DEBUG] Startup script created with ID: '%s'", startupScriptID)
 
 	// Check if startup script ID is empty
 	if startupScriptID == "" {
-		klog.Errorf("[DEBUG] ❌ Startup script creation returned empty ID - cannot proceed with instance creation")
-		return "", hostname, fmt.Errorf("startup script creation returned empty ID")
+		klog.Errorf("[DEBUG] Startup script creation returned empty ID - cannot proceed with instance creation")
+		return "", hostname, errors.New("startup script creation returned empty ID")
 	}
+
+	defer func() {
+		// clean up the starup script if the id is valid
+		if startupScriptID != "" {
+			m.dcService.DeleteStartScript(startupScriptID)
+		}
+	}()
 
 	// Determine image to use based on instance type
 	var image string
@@ -590,8 +615,13 @@ func (m *DatacrunchManager) createOrGetStartupScript(asg *Asg, nodeConfig *nodeC
 	// patch the script
 	startupScriptEnv := m.cfg.StartupScriptEnv
 	startupScriptEnv["PROVIDER_ID"] = providerID
-	_patchedBase64Script := patchScript(_base64Script, startupScriptEnv)
+	labels := convertConfigLabelsToK8sLabels(nodeConfig.Labels, asg)
+	startupScriptEnv["LABELS"] = labels
 
+	klog.Infof("[DEBUG] Startup script environment: %v", startupScriptEnv)
+
+	// patch the script
+	_patchedBase64Script := patchScript(_base64Script, startupScriptEnv)
 	// stringify the script
 	_scriptsUtf8 := string(_patchedBase64Script)
 
