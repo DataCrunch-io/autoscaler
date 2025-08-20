@@ -1,0 +1,278 @@
+---
+# Namespace for DataCrunch Cluster Autoscaler
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: cluster-autoscaler
+  labels:
+    name: cluster-autoscaler
+
+---
+# ServiceAccount for Cluster Autoscaler
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  labels:
+    app.kubernetes.io/name: cluster-autoscaler
+  name: cluster-autoscaler
+  namespace: cluster-autoscaler
+
+---
+# ClusterRole with required permissions
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: cluster-autoscaler
+  labels:
+    app.kubernetes.io/name: cluster-autoscaler
+rules:
+  - apiGroups: [""]
+    resources: ["events", "endpoints"]
+    verbs: ["create", "patch"]
+  - apiGroups: [""]
+    resources: ["pods/eviction"]
+    verbs: ["create"]
+  - apiGroups: [""]
+    resources: ["pods/status"]
+    verbs: ["update"]
+  - apiGroups: [""]
+    resources: ["endpoints"]
+    resourceNames: ["cluster-autoscaler"]
+    verbs: ["get", "update"]
+  - apiGroups: [""]
+    resources: ["nodes"]
+    verbs: ["watch", "list", "get", "update"]
+  - apiGroups: [""]
+    resources:
+      - "namespaces"
+      - "pods"
+      - "services"
+      - "replicationcontrollers"
+      - "persistentvolumeclaims"
+      - "persistentvolumes"
+    verbs: ["watch", "list", "get"]
+  - apiGroups: ["extensions"]
+    resources: ["replicasets", "daemonsets"]
+    verbs: ["watch", "list", "get"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["watch", "list"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets", "replicasets", "daemonsets"]
+    verbs: ["watch", "list", "get"]
+  - apiGroups: ["storage.k8s.io"]
+    resources: ["storageclasses", "csinodes", "csidrivers", "csistoragecapacities"]
+    verbs: ["watch", "list", "get"]
+  - apiGroups: ["batch", "extensions"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "patch"]
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["create"]
+  - apiGroups: ["coordination.k8s.io"]
+    resourceNames: ["cluster-autoscaler"]
+    resources: ["leases"]
+    verbs: ["get", "update"]
+
+---
+# ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: cluster-autoscaler
+  labels:
+    app.kubernetes.io/name: cluster-autoscaler
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: cluster-autoscaler
+subjects:
+- kind: ServiceAccount
+  name: cluster-autoscaler
+  namespace: cluster-autoscaler
+
+---
+# Secret containing DataCrunch credentials
+apiVersion: v1
+kind: Secret
+metadata:
+  name: datacrunch-credentials
+  namespace: cluster-autoscaler
+type: Opaque
+data:
+  # Replace these with your actual base64-encoded credentials
+  # echo -n 'your-client-id' | base64
+  client-id: eW91ci1jbGllbnQtaWQ=
+  # echo -n 'your-client-secret' | base64  
+  client-secret: eW91ci1jbGllbnQtc2VjcmV0
+
+---
+# ConfigMap containing cluster configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: datacrunch-cluster-config
+  namespace: cluster-autoscaler
+  labels:
+    app: cluster-autoscaler
+data:
+  cluster-config.json: |
+    {
+      "image": {
+        "gpu": "ubuntu-24.04-cuda-12.8-open-docker",
+        "cpu": "ubuntu-24.04"
+      },
+      "sshKeyIDs": ["your-ssh-key-id"],
+      "billingConfig": {
+        "price": "FIXED_PRICE",
+        "contract": "PAY_AS_YOU_GO"
+      },
+      "labels": {
+        "gpu": {
+          "node-type": "gpu",
+          "workload": "ml"
+        },
+        "cpu": {
+          "node-type": "cpu"
+        }
+      },
+      "startupScript": "IyEvYmluL2Jhc2gKIyBSZXBsYWNlIHdpdGggeW91ciBiYXNlNjQgZW5jb2RlZCBzdGFydHVwIHNjcmlwdA==",
+      "startupScriptEnv": {
+        "K8S_VERSION": "1.32.7",
+        "MASTER_IP": "your-master-node-ip",
+        "MASTER_PORT": "6443",
+        "JOIN_TOKEN": "your-kubeadm-join-token",
+        "JOIN_HASH_FULL": "sha256:your-ca-cert-hash"
+      },
+      "additionalVolumes": [],
+      "taints": [
+        {
+          "key": "node.kubernetes.io/unschedulable",
+          "effect": "NoSchedule"
+        }
+      ]
+    }
+
+---
+# Deployment for DataCrunch Cluster Autoscaler
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: cluster-autoscaler
+  namespace: cluster-autoscaler
+  labels:
+    app: cluster-autoscaler
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: cluster-autoscaler
+  template:
+    metadata:
+      labels:
+        app: cluster-autoscaler
+      annotations:
+        prometheus.io/scrape: 'true'
+        prometheus.io/port: '8085'
+    spec:
+      priorityClassName: system-cluster-critical
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65534
+        fsGroup: 65534
+        seccompProfile:
+          type: RuntimeDefault
+      serviceAccountName: cluster-autoscaler
+      containers:
+      - image: registry.k8s.io/autoscaling/cluster-autoscaler:v1.30.0
+        name: cluster-autoscaler
+        resources:
+          limits:
+            cpu: 100m
+            memory: 600Mi
+          requests:
+            cpu: 100m
+            memory: 600Mi
+        command:
+        - ./cluster-autoscaler
+        - --v=4
+        - --stderrthreshold=info
+        - --cloud-provider=datacrunch
+        - --skip-nodes-with-local-storage=false
+        - --expander=least-waste
+        - --cloud-config=/etc/datacrunch/cluster-config.json
+        - --nodes=1:10:CPU.4V.16G:FIN-01:cpu-workers
+        - --nodes=0:5:1A6000.10V:FIN-01:gpu-workers
+        - --scale-down-delay-after-add=10m
+        - --scale-down-unneeded-time=10m
+        - --max-node-provision-time=15m
+        - --scan-interval=10s
+        - --scale-down-delay-after-delete=10s
+        - --scale-down-delay-after-failure=3m
+        - --balance-similar-node-groups
+        - --skip-nodes-with-system-pods=false
+        env:
+        - name: DATACRUNCH_CLIENT_ID
+          valueFrom:
+            secretKeyRef:
+              name: datacrunch-credentials
+              key: client-id
+        - name: DATACRUNCH_CLIENT_SECRET
+          valueFrom:
+            secretKeyRef:
+              name: datacrunch-credentials
+              key: client-secret
+        - name: DATACRUNCH_BASE_URL
+          value: "https://api.datacrunch.io/v1"
+        - name: DATACRUNCH_CLUSTER_CONFIG_FILE
+          value: "/etc/datacrunch/cluster-config.json"
+        livenessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /health-check
+            port: 8085
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 10
+        readinessProbe:
+          failureThreshold: 3
+          httpGet:
+            path: /health-check
+            port: 8085
+            scheme: HTTP
+          periodSeconds: 10
+          successThreshold: 1
+          timeoutSeconds: 10
+        ports:
+        - containerPort: 8085
+          name: http
+          protocol: TCP
+        securityContext:
+          allowPrivilegeEscalation: false
+          capabilities:
+            drop:
+            - ALL
+          readOnlyRootFilesystem: true
+        volumeMounts:
+        - mountPath: /etc/ssl/certs/ca-certificates.crt
+          name: ssl-certs
+          readOnly: true
+        - mountPath: /etc/datacrunch
+          name: datacrunch-config
+          readOnly: true
+      volumes:
+      - hostPath:
+          path: /etc/ssl/certs/ca-certificates.crt
+          type: File
+        name: ssl-certs
+      - configMap:
+          name: datacrunch-cluster-config
+        name: datacrunch-config
+      tolerations:
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/control-plane
+      - effect: NoSchedule
+        key: node-role.kubernetes.io/master
+      nodeSelector:
+        kubernetes.io/os: linux

@@ -31,7 +31,6 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/instance"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/instancetypes"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/startscripts"
-	"k8s.io/client-go/kubernetes"
 	klog "k8s.io/klog/v2"
 )
 
@@ -44,7 +43,6 @@ type DatacrunchManager struct {
 	cfg         *cloudConfig
 	sdkProvider *datacrunchSDKProvider
 	dcService   *datacrunchWrapper
-	kubeClient  kubernetes.Interface
 	asgs        *autoScalingGroups
 }
 
@@ -64,8 +62,7 @@ type InstanceResource struct {
 	GPU          int64
 }
 
-func createDatacrunchManager(cloudReader io.Reader, discoveryOpts cloudprovider.NodeGroupDiscoveryOptions, kubeClient kubernetes.Interface) (*DatacrunchManager, error) {
-	klog.Infof("[DEBUG] createDatacrunchManager called with nodeGroupSpecs: %v", discoveryOpts.NodeGroupSpecs)
+func createDatacrunchManager(cloudReader io.Reader, discoveryOpts cloudprovider.NodeGroupDiscoveryOptions) (*DatacrunchManager, error) {
 	cfg := &cloudConfig{}
 	if cloudReader != nil {
 		decoder := json.NewDecoder(cloudReader)
@@ -99,12 +96,11 @@ func createDatacrunchManager(cloudReader io.Reader, discoveryOpts cloudprovider.
 		cfg:         cfg,
 		sdkProvider: sdkProvider,
 		dcService:   dcService,
-		kubeClient:  kubeClient,
 		asgs:        nil, // Will be set after creation
 	}
 
 	// Initialize ASG registry
-	manager.asgs, err = newAutoScalingGroups(dcService, discoveryOpts.NodeGroupSpecs, cfg, kubeClient)
+	manager.asgs, err = newAutoScalingGroups(dcService, discoveryOpts.NodeGroupSpecs, cfg)
 	if err != nil {
 		return nil, err
 	}

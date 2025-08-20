@@ -99,26 +99,18 @@ func (ia *customInstanceAvailability) GetInstanceAvailabilityLocation(instanceTy
 
 	instanceAvailabilityResponses, err := ia.ListInstanceAvailability()
 	if err != nil {
-		klog.Infof("[DEBUG] Error fetching availability data: %v\n", err)
+		klog.Errorf("[DEBUG] Error fetching availability data: %v\n", err)
 		return "", err
 	}
-	klog.Infof("[DEBUG] All data: %v\n", instanceAvailabilityResponses)
-	// print all instance availability responses
-	for _, availabilityData := range instanceAvailabilityResponses {
-		klog.Infof("[DEBUG] Location: %s, Availabilities: %v", availabilityData.LocationCode, availabilityData.Availabilities)
-	}
 
-	// capticulate all available instance types
+	// convert all locations to upper case
 	newLocations := make([]string, len(locations))
 	for i, location := range locations {
 		newLocations[i] = strings.ToUpper(location)
 	}
 
 	for _, availabilityData := range instanceAvailabilityResponses {
-		klog.Infof("[DEBUG] Checking location %s", availabilityData.LocationCode)
 		if slices.Contains(newLocations, availabilityData.LocationCode) {
-			klog.Infof("[DEBUG] Found matching location %s, checking %d available types\n", availabilityData.LocationCode, len(availabilityData.Availabilities))
-
 			for _, availability := range availabilityData.Availabilities {
 				if availability == instanceType {
 					klog.Infof("[DEBUG] Instance type %s is AVAILABLE in location %s\n", instanceType, availabilityData.LocationCode)
@@ -129,7 +121,7 @@ func (ia *customInstanceAvailability) GetInstanceAvailabilityLocation(instanceTy
 		}
 	}
 
-	klog.Infof("[DEBUG] Location %s not found in availability data\n", newLocations)
+	klog.Warningf("[DEBUG] Location %s not found in availability data\n", newLocations)
 	return "", nil
 }
 
@@ -138,15 +130,11 @@ func (ia *customInstanceAvailability) GetInstanceTypeDetails(instanceType string
 		return nil, fmt.Errorf("instance type is empty")
 	}
 
-	klog.Infof("[DEBUG] Getting instance type details for %s\n", instanceType)
-
 	instanceTypeDetails, err := ia.ListInstanceTypes()
 	if err != nil {
-		klog.Infof("[DEBUG] Error fetching instance types: %v\n", err)
+		klog.Errorf("[DEBUG] Error fetching instance types: %v\n", err)
 		return nil, err
 	}
-
-	klog.Infof("[DEBUG] Received %d instance types from API for GetInstanceTypeDetails\n", len(instanceTypeDetails))
 
 	// Add detailed debugging for each instance type
 	for _, it := range instanceTypeDetails {
@@ -191,7 +179,6 @@ func (ia *customInstance) GetInstanceByHostname(hostname string) (instance.ListI
 }
 
 func (ia *customInstance) GetAllInstancesByDescription(description string) ([]instance.ListInstancesResponse, error) {
-	klog.Infof("[DEBUG] GetAllInstancesByDescription called with description: '%s'", description)
 	instances, err := ia.ListInstances(&instance.ListInstancesInput{
 		Status: string(instance.InstanceStatusRunning),
 	})
@@ -200,23 +187,15 @@ func (ia *customInstance) GetAllInstancesByDescription(description string) ([]in
 		return []instance.ListInstancesResponse{}, err
 	}
 
-	klog.Infof("[DEBUG] ListInstances returned %d total instances", len(instances))
-	for i, inst := range instances {
-		klog.Infof("[DEBUG] Instance[%d]: ID='%s', Hostname='%s', Description='%s', Status='%s'", 
-			i, inst.ID, inst.Hostname, inst.Description, inst.Status)
-	}
-
 	filteredInstances := make([]instance.ListInstancesResponse, 0, len(instances))
 	for _, instance := range instances {
-		klog.Infof("[DEBUG] Checking instance '%s': description='%s' vs target='%s', match=%t", 
-			instance.Hostname, instance.Description, description, instance.Description == description)
+		// will match with asg name with description which uses for asg name
 		if instance.Description == description {
 			filteredInstances = append(filteredInstances, *instance)
-			klog.Infof("[DEBUG] Added instance '%s' to filtered results", instance.Hostname)
 		}
 	}
-	
-	klog.Infof("[DEBUG] GetAllInstancesByDescription returning %d filtered instances for description '%s'", 
+
+	klog.Infof("[DEBUG] GetAllInstancesByDescription returning %d filtered instances for description '%s'",
 		len(filteredInstances), description)
 	return filteredInstances, nil
 }

@@ -25,9 +25,6 @@ import (
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider"
 	"k8s.io/autoscaler/cluster-autoscaler/config"
 	"k8s.io/autoscaler/cluster-autoscaler/utils/errors"
-	"k8s.io/client-go/kubernetes"
-	"k8s.io/client-go/rest"
-	"k8s.io/client-go/tools/clientcmd"
 	"k8s.io/klog/v2"
 )
 
@@ -183,7 +180,7 @@ func BuildDatacrunch(
 		defer configFile.Close()
 	}
 
-	manager, err := createDatacrunchManager(configFile, do, createKubeClient(opts))
+	manager, err := createDatacrunchManager(configFile, do)
 	if err != nil {
 		klog.Fatalf("Failed to create DataCrunch manager: %v", err)
 	}
@@ -194,18 +191,4 @@ func BuildDatacrunch(
 	}
 
 	return provider
-}
-
-func getKubeConfig(opts config.AutoscalingOptions) *rest.Config {
-	klog.Infof("Using kubeconfig file: %s", opts.KubeClientOpts.KubeConfigPath)
-	kubeConfig, err := clientcmd.BuildConfigFromFlags("", opts.KubeClientOpts.KubeConfigPath)
-	if err != nil {
-		klog.Fatalf("Failed to build kubeConfig: %v", err)
-	}
-
-	return kubeConfig
-}
-
-func createKubeClient(opts config.AutoscalingOptions) kubernetes.Interface {
-	return kubernetes.NewForConfigOrDie(getKubeConfig(opts))
 }

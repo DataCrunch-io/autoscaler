@@ -29,7 +29,6 @@ import (
 	apiv1 "k8s.io/api/core/v1"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/instance"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/startscripts"
-	"k8s.io/client-go/kubernetes"
 	klog "k8s.io/klog/v2"
 )
 
@@ -39,9 +38,7 @@ type autoScalingGroups struct {
 	instanceToAsg     map[InstanceRef]*Asg
 	asgNodeGroupSpecs map[AsgRef]string
 	cfg               *cloudConfig
-
-	dcService  *datacrunchWrapper
-	kubeClient kubernetes.Interface
+	dcService         *datacrunchWrapper
 
 	cacheMutex sync.Mutex
 }
@@ -50,7 +47,7 @@ type asgInformation struct {
 	config *Asg
 }
 
-func newAutoScalingGroups(dcService *datacrunchWrapper, nodeGroupSpecs []string, cfg *cloudConfig, kubeClient kubernetes.Interface) (*autoScalingGroups, error) {
+func newAutoScalingGroups(dcService *datacrunchWrapper, nodeGroupSpecs []string, cfg *cloudConfig) (*autoScalingGroups, error) {
 	registry := &autoScalingGroups{
 		registeredAsgs:    make(map[AsgRef]*Asg),
 		asgToInstances:    make(map[AsgRef][]InstanceRef),
@@ -58,10 +55,8 @@ func newAutoScalingGroups(dcService *datacrunchWrapper, nodeGroupSpecs []string,
 		asgNodeGroupSpecs: make(map[AsgRef]string),
 		cfg:               cfg,
 		dcService:         dcService,
-		kubeClient:        kubeClient,
 	}
 
-	klog.Infof("newAutoScalingGroups: nodeGroupSpecs: %v", nodeGroupSpecs)
 	if err := registry.parseASGNodeGroupSpecs(nodeGroupSpecs); err != nil {
 		return nil, err
 	}
@@ -261,7 +256,7 @@ func (m *autoScalingGroups) scaleUpAsg(asg *Asg, delta int) error {
 		go func(index int, location string) {
 			defer waitGroup.Done()
 			klog.Infof("[DEBUG] Creating instance %d/%d for ASG %s", index+1, delta, asg.Name)
-			instanceID, hostname, err := m.createInstanceForAsg(asg, nodeConfig, location)
+			_, hostname, err := m.createInstanceForAsg(asg, nodeConfig, location)
 			if err != nil {
 				klog.Errorf("[DEBUG] Failed to create instance %d for ASG %s: %v", index+1, asg.Name, err)
 				errsCh <- err
@@ -273,18 +268,6 @@ func (m *autoScalingGroups) scaleUpAsg(asg *Asg, delta int) error {
 
 				// update asg curSize
 				asg.curSize++
-
-				// if exists do nothing
-				node, err := getNodeByName(m.kubeClient, hostname)
-				if err != nil {
-					klog.Infof("node %s not found in k8s", hostname)
-				}
-				if node != nil {
-					// if not exists then need to need update over k8s api
-					providerID := fmt.Sprintf("%s%s/%s", datacrunchProviderIDPrefix, location, hostname)
-					setNodeProviderID(m.kubeClient, hostname, providerID)
-				}
-				klog.Infof("[DEBUG] Successfully created instance %s (hostname: %s) for ASG %s [%d/%d]", instanceID, hostname, asg.Name, index+1, delta)
 			}
 		}(i, location)
 	}

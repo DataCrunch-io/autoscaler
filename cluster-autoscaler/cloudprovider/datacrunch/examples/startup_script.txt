@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+### ====== CONFIGURE THESE ====== ###
+MASTER_IP=""
+MASTER_PORT=""
+K8S_VERSION="1.32.7"
+
+# From `kubeadm token create --print-join-command` on the master:
+JOIN_TOKEN=""
+JOIN_HASH_FULL=""
+
+# Provider ID to register with kubelet
+# AS will filled in automatically
+PROVIDER_ID=""
+### ============================== ###
+
+export DEBIAN_FRONTEND=noninteractive
+
+echo "[0/6] Fast exit if already joined"
+if [ -f /etc/kubernetes/kubelet.conf ]; then
+  echo "Node already joined (/etc/kubernetes/kubelet.conf exists). Nothing to do."
+  exit 0
+fi
+
+echo "[1/6] Disable swap + sysctl"
+swapoff -a || true
+sed -i.bak '/\sswap\s/d' /etc/fstab || true
+modprobe overlay || true
+modprobe br_netfilter || true
+cat >/etc/sysctl.d/k8s.conf <<'EOF'
+net.bridge.bridge-nf-call-iptables=1
+net.bridge.bridge-nf-call-ip6tables=1
+net.ipv4.ip_forward=1
+EOF
+sysctl --system
+
+echo "[2/6] Containerd with CRI + systemd cgroups"
+apt-get update
+apt-get install -y apt-transport-https ca-certificates curl gnupg lsb-release software-properties-common containerd
+
+mkdir -p /etc/containerd
+cat >/etc/containerd/config.toml <<'EOF'
+version = 2
+disabled_plugins = []
+
+[plugins."io.containerd.grpc.v1.cri"]
+  sandbox_image = "registry.k8s.io/pause:3.10"
+
+[plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc]
+  runtime_type = "io.containerd.runc.v2"
+  [plugins."io.containerd.grpc.v1.cri".containerd.runtimes.runc.options]
+    SystemdCgroup = true
+EOF
+
+systemctl daemon-reload
+systemctl enable --now containerd
+systemctl restart containerd
+
+# crictl config (optional but nice)
+cat >/etc/crictl.yaml <<'EOF'
+runtime-endpoint: unix:///var/run/containerd/containerd.sock
+image-endpoint:   unix:///var/run/containerd/containerd.sock
+timeout: 10
+debug: false
+EOF
+
+echo "[3/6] Kubernetes repo + tools ${K8S_VERSION} (overwrite keyring without prompt)"
+mkdir -p /etc/apt/keyrings
+chmod 755 /etc/apt/keyrings
+curl -fsSL "https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION%.*}/deb/Release.key" \
+  | gpg --dearmor \
+  | tee /etc/apt/keyrings/kubernetes-apt-keyring.gpg >/dev/null
+
+cat >/etc/apt/sources.list.d/kubernetes.list <<EOF
+deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v${K8S_VERSION%.*}/deb/ /
+EOF
+
+apt-get update
+apt-get install -y kubelet="${K8S_VERSION}-*" kubeadm="${K8S_VERSION}-*" kubectl="${K8S_VERSION}-*"
+apt-mark hold kubelet kubeadm kubectl
+
+echo "[4/6] Pre-set kubelet provider-id (via /etc/default/kubelet)"
+# Create file if missing
+[ -f /etc/default/kubelet ] || : > /etc/default/kubelet
+
+# Remove any previous --provider-id=... token and reconstruct the line
+CURRENT="$(grep -oE '^KUBELET_EXTRA_ARGS=.*' /etc/default/kubelet | sed 's/\r$//' || true)"
+CURRENT="${CURRENT#KUBELET_EXTRA_ARGS=}"                                 # drop prefix
+CURRENT="${CURRENT%\"}"; CURRENT="${CURRENT#\"}"                          # drop surrounding quotes if any
+CLEANED="$(printf '%s\n' "$CURRENT" | sed 's/--provider-id=[^ ]*//g' | xargs)"
+NEW_ARGS="$(printf '%s %s\n' "$CLEANED" "--provider-id=${PROVIDER_ID}" | xargs)"
+
+# Write back (quote to be safe) - using # as delimiter to avoid issues with slashes in PROVIDER_ID
+grep -q '^KUBELET_EXTRA_ARGS=' /etc/default/kubelet && \
+  sed -i 's#^KUBELET_EXTRA_ARGS=.*#KUBELET_EXTRA_ARGS="'"$NEW_ARGS"'"#' /etc/default/kubelet || \
+  echo 'KUBELET_EXTRA_ARGS="'"$NEW_ARGS"'"' >> /etc/default/kubelet
+
+# 2) Show exactly what we'll run
+echo "[preflight] /etc/default/kubelet now is:"
+sed -n '1,120p' /etc/default/kubelet
+
+# 3) Make systemd pick it up
+systemctl daemon-reexec
+systemctl restart kubelet || true
+
+# 4) Hard verification BEFORE join:
+if grep -q -- "--provider-id=${PROVIDER_ID}" /etc/default/kubelet; then
+  echo "[preflight] provider-id configured ✅"
+else
+  echo "[preflight] provider-id still missing ❌"; exit 1
+fi
+
+echo "[5/6] Join the cluster"
+kubeadm join "${MASTER_IP}:${MASTER_PORT}" \
+  --token "${JOIN_TOKEN}" \
+  --discovery-token-ca-cert-hash "${JOIN_HASH_FULL}" \
+  --node-name "$(hostname)"
+
+echo "[6/6] Done. Kubelet will register with providerID='${PROVIDER_ID}'."
+echo "Verify from master:  kubectl get node $(hostname) -o jsonpath='{.spec.providerID}'; echo"

@@ -19,57 +19,14 @@ package datacrunch
 import (
 	"bufio"
 	"bytes"
-	"context"
-	"errors"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/client-go/kubernetes"
 	"k8s.io/klog/v2"
 )
-
-func getNodeByName(kubeClient kubernetes.Interface, nodename string) (*v1.Node, error) {
-	if kubeClient == nil {
-		return nil, errors.New("kubeconfig is required")
-	}
-	if nodename == "" {
-		return nil, errors.New("node name is required")
-	}
-
-	node, err := kubeClient.CoreV1().Nodes().Get(context.Background(), nodename, metav1.GetOptions{})
-	if err != nil {
-		klog.Errorf("failed to get node %s %+v", nodename, err)
-		return nil, err
-	}
-
-	return node, nil
-}
-
-func setNodeProviderID(kubeClient kubernetes.Interface, nodeName string, value string) error {
-	node, err := getNodeByName(kubeClient, nodeName)
-	if err != nil {
-		klog.Errorf("failed to get node %s %+v", nodeName, err)
-		return err
-	}
-
-	if node.Spec.ProviderID == value {
-		return nil
-	}
-
-	node.Spec.ProviderID = value
-
-	_, err = kubeClient.CoreV1().Nodes().Update(context.Background(), node, metav1.UpdateOptions{})
-	if err != nil {
-		klog.Errorf("failed to update node's provider ID %s %+v", nodeName, err)
-		return err
-	}
-	klog.Infof("updated provider ID on node: %s", nodeName)
-	return nil
-}
 
 // Matches: [optional spaces][optional "export "][VAR][=][VALUE][optional inline comment]
 var assignRe = regexp.MustCompile(`^\s*(export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)(\s+#.*)?$`)
@@ -319,19 +276,4 @@ func instanceRefFromProviderId(providerId string) (*InstanceRef, error) {
 		return nil, fmt.Errorf("invalid provider ID: %s", providerId)
 	}
 	return &InstanceRef{Hostname: parts[len(parts)-1], ProviderID: providerId}, nil
-}
-
-// toInstanceID parses the providerID and returns the instanceID
-func toInstanceIDAndHostname(providerID string) (string, string, error) {
-	// try to parse the providerID as datacrunch://location/hostname
-	if !strings.HasPrefix(providerID, datacrunchProviderIDPrefix) {
-		return "", "", fmt.Errorf("invalid providerID format: %s", providerID)
-	}
-	//
-	_providerID := strings.TrimPrefix(providerID, datacrunchProviderIDPrefix)
-	parts := strings.Split(_providerID, "/")
-	if len(parts) < 2 {
-		return "", "", fmt.Errorf("invalid providerID format: %s", providerID)
-	}
-	return parts[0], parts[1], nil
 }

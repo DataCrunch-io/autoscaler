@@ -1,0 +1,31 @@
+{
+  "image": {
+    "gpu": "ubuntu-24.04-cuda-12.8-open-docker",
+    "cpu": "ubuntu-24.04"
+  },
+  "sshKeyIDs": ["98479344-2936-4452-a6b2-a46d9fcd0706"],
+  "billingConfig": {
+    "price": "DYNAMIC_PRICE",
+    "contract": "PAY_AS_YOU_GO"
+  },
+  "debug": false,
+  "availableLocations": ["FIN-01", "FIN-02", "FIN-03"],
+  "labels": {
+    "gpu": {
+      "node-type": "gpu"
+    },
+    "cpu": {
+      "node-type": "cpu"
+    }
+  },
+  "startupScript": "startup script in base64 encoded",
+  "startupScriptEnv": {
+    "K8S_VERSION": "1.32.7",
+    "MASTER_IP": "",
+    "MASTER_PORT": "",
+    "JOIN_TOKEN": "",
+    "JOIN_HASH_FULL": ""
+  },
+  "additionalVolumes": [],
+  "taints": []
+}
