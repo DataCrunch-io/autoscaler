@@ -59,7 +59,7 @@ type instanceAvailabilityI interface {
 
 type customInstanceAvailabilityI interface {
 	GetInstanceAvailabilityLocation(instanceType string, locations []string) (string, error)
-	GetInstanceTypeDetails(instanceType string) (*InstanceType, error)
+	GetInstanceTypeDetails(instanceType string) (*InstanceResource, error)
 }
 
 type customInstanceAvailability struct {
@@ -133,7 +133,7 @@ func (ia *customInstanceAvailability) GetInstanceAvailabilityLocation(instanceTy
 	return "", nil
 }
 
-func (ia *customInstanceAvailability) GetInstanceTypeDetails(instanceType string) (*InstanceType, error) {
+func (ia *customInstanceAvailability) GetInstanceTypeDetails(instanceType string) (*InstanceResource, error) {
 	if instanceType == "" {
 		return nil, fmt.Errorf("instance type is empty")
 	}
@@ -150,23 +150,18 @@ func (ia *customInstanceAvailability) GetInstanceTypeDetails(instanceType string
 
 	// Add detailed debugging for each instance type
 	for _, it := range instanceTypeDetails {
-		klog.Infof("[DEBUG] Instance type %d: InstanceType='%s', Name='%s', ID='%s'\n",
-			it.InstanceType, it.Name, it.ID)
-		klog.Infof("[DEBUG] cpu: cores=%v, Description='%s'\n",
-			safeDeref(it.CPU.NumberOfCores), it.CPU.Description)
-		klog.Infof("[DEBUG] memory: GB=%v, Description='%s'\n",
-			safeDeref(it.Memory.SizeInGigabytes), it.Memory.Description)
-		klog.Infof("[DEBUG] gpu: count=%v, Description='%s'\n",
-			safeDeref(it.GPU.NumberOfGPUs), it.GPU.Description)
 
 		// Look for your specific instance type
 		if it.InstanceType == instanceType {
+
 			klog.Infof("[DEBUG] MATCH FOUND for %s: CPU=%v, Memory=%vGB, GPU=%v\n",
 				instanceType, safeDeref(it.CPU.NumberOfCores), safeDeref(it.Memory.SizeInGigabytes), safeDeref(it.GPU.NumberOfGPUs))
-			return &InstanceType{
-				CPU:    *it.CPU.NumberOfCores,
-				Memory: *it.Memory.SizeInGigabytes * 1024 * 1024 * 1024,
-				GPU:    *it.GPU.NumberOfGPUs,
+			return &InstanceResource{
+				InstanceType: it.InstanceType,
+				Arch:         "amd64",
+				CPU:          *it.CPU.NumberOfCores,
+				Memory:       *it.Memory.SizeInGigabytes * 1024 * 1024 * 1024,
+				GPU:          *it.GPU.NumberOfGPUs,
 			}, nil
 		}
 	}
@@ -196,18 +191,32 @@ func (ia *customInstance) GetInstanceByHostname(hostname string) (instance.ListI
 }
 
 func (ia *customInstance) GetAllInstancesByDescription(description string) ([]instance.ListInstancesResponse, error) {
+	klog.Infof("[DEBUG] GetAllInstancesByDescription called with description: '%s'", description)
 	instances, err := ia.ListInstances(&instance.ListInstancesInput{
 		Status: string(instance.InstanceStatusRunning),
 	})
 	if err != nil {
+		klog.Errorf("[DEBUG] ListInstances API call failed: %v", err)
 		return []instance.ListInstancesResponse{}, err
+	}
+
+	klog.Infof("[DEBUG] ListInstances returned %d total instances", len(instances))
+	for i, inst := range instances {
+		klog.Infof("[DEBUG] Instance[%d]: ID='%s', Hostname='%s', Description='%s', Status='%s'", 
+			i, inst.ID, inst.Hostname, inst.Description, inst.Status)
 	}
 
 	filteredInstances := make([]instance.ListInstancesResponse, 0, len(instances))
 	for _, instance := range instances {
+		klog.Infof("[DEBUG] Checking instance '%s': description='%s' vs target='%s', match=%t", 
+			instance.Hostname, instance.Description, description, instance.Description == description)
 		if instance.Description == description {
 			filteredInstances = append(filteredInstances, *instance)
+			klog.Infof("[DEBUG] Added instance '%s' to filtered results", instance.Hostname)
 		}
 	}
+	
+	klog.Infof("[DEBUG] GetAllInstancesByDescription returning %d filtered instances for description '%s'", 
+		len(filteredInstances), description)
 	return filteredInstances, nil
 }

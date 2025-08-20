@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	v1 "k8s.io/api/core/v1"
@@ -259,8 +260,78 @@ func convertConfigLabelsToK8sLabels(labels []string, asg *Asg) string {
 	}
 
 	labels = append(labels, fmt.Sprintf("%s=%s", GPULabel, asg.instanceType))
-	labels = append(labels, fmt.Sprintf("%s=%s", nodeGroupLabel, asg.id))
+	labels = append(labels, fmt.Sprintf("%s=%s", nodeGroupLabel, asg.Name))
 
 	_k8sLabels := strings.Join(labels, ",")
 	return _k8sLabels
+}
+
+// parse format: min:max:instance-type:asg-name
+func parseAsgSpec(spec string) (*DatacrunchAsgSpec, error) {
+	klog.Infof("[DEBUG] Parsing ASG spec: %s", spec)
+	parts := strings.Split(spec, ":")
+	if len(parts) != 4 {
+		klog.Errorf("[DEBUG] Invalid ASG spec format: expected 4 parts, got %d - %v", len(parts), parts)
+		return nil, fmt.Errorf("invalid ASG spec: %s", spec)
+	}
+
+	instanceType := parts[2]
+	asgName := parts[3]
+
+	minSize, err := strconv.Atoi(parts[0])
+	if err != nil {
+		return nil, fmt.Errorf("invalid min size: %s", parts[0])
+	}
+
+	maxSize, err := strconv.Atoi(parts[1])
+	if err != nil {
+		return nil, fmt.Errorf("invalid max size: %s", parts[1])
+	}
+
+	validAsgName := regexp.MustCompile(`^[a-z0-9A-Z]+[a-z0-9A-Z\-\.\_]*[a-z0-9A-Z]+$|^[a-z0-9A-Z]{1}$`)
+	if !validAsgName.MatchString(asgName) {
+		return nil, fmt.Errorf("invalid ASG name: %s", asgName)
+	}
+
+	klog.Infof("[DEBUG] Parsed ASG spec successfully: min=%d, max=%d, instanceType=%s, name=%s",
+		minSize, maxSize, instanceType, asgName)
+	return &DatacrunchAsgSpec{
+		minSize:      minSize,
+		maxSize:      maxSize,
+		instanceType: instanceType,
+		name:         asgName,
+	}, nil
+}
+
+// isGPUInstanceType determines if an instance type is GPU-based
+func isGPUInstanceType(instanceType string) bool {
+	// Common GPU instance type patterns
+	// instanceType start with "CPU." will be CPU others will be GPU
+	return !strings.HasPrefix(strings.ToUpper(instanceType), "CPU.")
+}
+
+// InstanceRefFromProviderId returns the InstanceRef from the provider ID
+func instanceRefFromProviderId(providerId string) (*InstanceRef, error) {
+	// trim datacrunchProviderIDPrefix from providerId
+	providerIdBase := strings.TrimPrefix(providerId, datacrunchProviderIDPrefix)
+	parts := strings.Split(providerIdBase, "/")
+	if len(parts) < 2 {
+		return nil, fmt.Errorf("invalid provider ID: %s", providerId)
+	}
+	return &InstanceRef{Hostname: parts[len(parts)-1], ProviderID: providerId}, nil
+}
+
+// toInstanceID parses the providerID and returns the instanceID
+func toInstanceIDAndHostname(providerID string) (string, string, error) {
+	// try to parse the providerID as datacrunch://location/hostname
+	if !strings.HasPrefix(providerID, datacrunchProviderIDPrefix) {
+		return "", "", fmt.Errorf("invalid providerID format: %s", providerID)
+	}
+	//
+	_providerID := strings.TrimPrefix(providerID, datacrunchProviderIDPrefix)
+	parts := strings.Split(_providerID, "/")
+	if len(parts) < 2 {
+		return "", "", fmt.Errorf("invalid providerID format: %s", providerID)
+	}
+	return parts[0], parts[1], nil
 }
