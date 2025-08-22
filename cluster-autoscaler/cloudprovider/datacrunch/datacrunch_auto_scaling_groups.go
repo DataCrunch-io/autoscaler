@@ -327,9 +327,6 @@ func (m *autoScalingGroups) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 	// Generate unique hostname
 	// asgname + location + timestamp
 	hostname := strings.ReplaceAll(fmt.Sprintf("%s-%s-%d", asg.Name, location, time.Now().Unix()), ".", "-")
-	klog.Infof("[DEBUG] createInstanceForAsg: ASG=%s, instanceType=%s, location=%s, hostname=%s",
-		asg.Name, asg.instanceType, location, hostname)
-
 	// Create or get startup script ID
 	providerID := fmt.Sprintf("datacrunch://%s/%s", location, hostname)
 	startupScriptID, err := m.createOrGetStartupScript(asg, nodeConfig, providerID)
@@ -337,7 +334,6 @@ func (m *autoScalingGroups) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 		klog.Errorf("[DEBUG] Failed to create startup script for ASG %s: %v", asg.Name, err)
 		return "", hostname, err
 	}
-	klog.Infof("[DEBUG] Startup script created with ID: '%s'", startupScriptID)
 
 	// Check if startup script ID is empty
 	if startupScriptID == "" {
@@ -355,21 +351,18 @@ func (m *autoScalingGroups) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 	// Determine image to use based on instance type
 	var image string
 	isGPU := isGPUInstanceType(asg.instanceType)
-	klog.Infof("[DEBUG] Instance type %s detected as GPU: %t", asg.instanceType, isGPU)
 	if isGPU {
 		image = m.cfg.Image.GPU
 		if image == "" {
 			klog.Errorf("[DEBUG] No GPU image configured for instance type %s", asg.instanceType)
 			return "", hostname, fmt.Errorf("no GPU image configured for instance type %s", asg.instanceType)
 		}
-		klog.Infof("[DEBUG] Using GPU image: %s", image)
 	} else {
 		image = m.cfg.Image.CPU
 		if image == "" {
 			klog.Errorf("[DEBUG] No CPU image configured for instance type %s", asg.instanceType)
 			return "", hostname, fmt.Errorf("no CPU image configured for instance type %s", asg.instanceType)
 		}
-		klog.Infof("[DEBUG] Using CPU image: %s", image)
 	}
 
 	// Create the instance input with all required fields
@@ -405,10 +398,7 @@ func (m *autoScalingGroups) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 		input.Volumes = volumes
 	}
 
-	// Create the instance
-	klog.Infof("[DEBUG] Creating DataCrunch instance: hostname=%s, type=%s, image=%s, location=%s, contract=%s, pricing=%s",
-		hostname, asg.instanceType, image, location, m.cfg.BillingConfig.Contract, m.cfg.BillingConfig.Price)
-
+	// TODO: Delete before official release
 	// Debug: Log full request body
 	if requestBody, err := json.MarshalIndent(input, "", "  "); err == nil {
 		klog.Infof("[DEBUG] CreateInstance request body:\n%s", string(requestBody))
@@ -420,15 +410,12 @@ func (m *autoScalingGroups) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 		return "", hostname, fmt.Errorf("failed to create instance: %v", err)
 	}
 
-	klog.Infof("[DEBUG] DataCrunch instance created successfully: ID=%s, hostname=%s", instanceID, hostname)
 	return instanceID, hostname, nil
 }
 
 // createOrGetStartupScript creates a startup script or returns existing ID if already created
 func (m *autoScalingGroups) createOrGetStartupScript(asg *Asg, nodeConfig *nodeConfig, providerID string) (string, error) {
-	scriptName := fmt.Sprintf("autoscaler-%s", asg.Name)
-	// Create new startup script
-	klog.Infof("Creating new startup script %s", scriptName)
+	scriptName := fmt.Sprintf("as-%s", asg.Name)
 	// decode the base64 and stringify to text utf8 encoded  new line "\n"
 	_base64Script, err := base64.StdEncoding.DecodeString(nodeConfig.StartupScript)
 	if err != nil {
@@ -441,8 +428,6 @@ func (m *autoScalingGroups) createOrGetStartupScript(asg *Asg, nodeConfig *nodeC
 	labels := convertConfigLabelsToK8sLabels(nodeConfig.Labels, asg)
 	startupScriptEnv["LABELS"] = labels
 
-	klog.Infof("[DEBUG] Startup script environment: %v", startupScriptEnv)
-
 	// patch the script
 	_patchedBase64Script := patchScript(_base64Script, startupScriptEnv)
 	// stringify the script
@@ -452,9 +437,6 @@ func (m *autoScalingGroups) createOrGetStartupScript(asg *Asg, nodeConfig *nodeC
 		Name:   scriptName,
 		Script: _scriptsUtf8,
 	}
-	if inputJSON, err := json.MarshalIndent(input, "", "  "); err == nil {
-		klog.Infof("[DEBUG] CreateStartScript request body:\n%s", string(inputJSON))
-	}
 
 	scriptID, err := m.dcService.CreateStartScript(input)
 	if err != nil {
@@ -462,9 +444,6 @@ func (m *autoScalingGroups) createOrGetStartupScript(asg *Asg, nodeConfig *nodeC
 		return "", fmt.Errorf("failed to create startup script: %v", err)
 	}
 
-	klog.Infof("[DEBUG] CreateStartScript response - scriptID: '%s'", scriptID)
-
-	klog.Infof("Created startup script %s with ID %s", scriptName, scriptID)
 	return scriptID, nil
 }
 
@@ -540,7 +519,6 @@ func (m *autoScalingGroups) scaleDownAsg(asg *Asg, count int) error {
 		klog.Warningf("Only deleted %d out of %d requested instances from ASG %s", deletedCount, count, asg.Name)
 	}
 
-	klog.Infof("Successfully scaled down ASG %s by %d instances", asg.Name, deletedCount)
 	return nil
 }
 
