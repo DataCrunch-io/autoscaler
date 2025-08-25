@@ -165,9 +165,9 @@ func (m *DatacrunchManager) GetAsgSize(asg *Asg) (int64, error) {
 		return 0, nil
 	}
 
-	instances := m.asgs.asgToInstances[asg.AsgRef]
-
-	return int64(len(instances)), nil
+	// Return curSize to be consistent with TargetSize()
+	// curSize is updated both during scale operations and during regenerate() from API
+	return int64(asg.curSize), nil
 }
 
 // Scaleup ASG
@@ -344,17 +344,19 @@ func (m *DatacrunchManager) buildNodeFromTemplate(asg *Asg, template *asgTemplat
 	nodeName := fmt.Sprintf("asg-%s-%d", asg.Name, rand.Int63())
 	klog.Infof("[DEBUG] Generated template node name: %s", nodeName)
 
+	labels := map[string]string{
+		"kubernetes.io/arch":               template.InstanceType.Arch,
+		"kubernetes.io/os":                 "linux",
+		"node.kubernetes.io/instance-type": template.InstanceType.InstanceType,
+		"topology.kubernetes.io/location":  strings.Join(asg.AvailabilityLocations, ","),
+		"datacrunch.io/hostname":           asg.Name,
+		GPULabel:                           asg.instanceType,
+		nodeGroupLabel:                     asg.Name,
+	}
+
 	node.ObjectMeta = metav1.ObjectMeta{
-		Name: nodeName,
-		Labels: map[string]string{
-			"kubernetes.io/arch":               template.InstanceType.Arch,
-			"kubernetes.io/os":                 "linux",
-			"node.kubernetes.io/instance-type": template.InstanceType.InstanceType,
-			"topology.kubernetes.io/location":  strings.Join(asg.AvailabilityLocations, ","),
-			"datacrunch.io/hostname":           asg.Name,
-			GPULabel:                           asg.instanceType,
-			nodeGroupLabel:                     asg.Name,
-		},
+		Name:   nodeName,
+		Labels: labels,
 	}
 
 	// Set node capacity and allocatable based on instance type

@@ -10,14 +10,7 @@
   },
   "debug": false,
   "availableLocations": ["FIN-01", "FIN-02", "FIN-03"],
-  "labels": {
-    "gpu": {
-      "node-type": "gpu"
-    },
-    "cpu": {
-      "node-type": "cpu"
-    }
-  },
+  "labels": [],
   "startupScript": "startup script in base64 encoded",
   "startupScriptEnv": {
     "K8S_VERSION": "1.32.7",

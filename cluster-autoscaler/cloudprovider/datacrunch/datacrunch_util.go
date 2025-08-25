@@ -277,3 +277,25 @@ func instanceRefFromProviderId(providerId string) (*InstanceRef, error) {
 	}
 	return &InstanceRef{Hostname: parts[len(parts)-1], ProviderID: providerId}, nil
 }
+
+// extractAsgNameFromHostname extracts the ASG name from a hostname using the magic separator
+// Hostname format: {asg-name}-{magic-number}-{location}-{timestamp}
+// Example: as-test-1b20030v-77-FIN-03-1756144020 → "as-test-1b20030v"
+// Also handles legacy format: {asg-name}-{location}-{timestamp} (for backward compatibility)
+func extractAsgNameFromHostname(hostname string) (string, error) {
+	// Try new format first with magic separator
+	separator := fmt.Sprintf("-%s-", ASG_SEPARATOR_MAGIC_NUMBER)
+
+	parts := strings.Split(hostname, separator)
+	if len(parts) == 2 {
+		asgName := parts[0]
+		if asgName == "" {
+			return "", fmt.Errorf("empty ASG name extracted from hostname: %s", hostname)
+		}
+		return asgName, nil
+	}
+
+	// For now, return error to force fallback to description-based lookup
+	// TODO: Implement smarter legacy parsing if needed
+	return "", fmt.Errorf("hostname does not contain magic separator '%s' and legacy parsing not implemented: %s", separator, hostname)
+}

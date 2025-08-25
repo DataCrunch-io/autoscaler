@@ -15,18 +15,19 @@ The cluster autoscaler for DataCrunch scales worker nodes.
 ```json
 {
   "image": {
-    "gpu": "ubuntu-24.04-cuda-12.8-open-docker",
-    "cpu": "ubuntu-24.04"
+    "gpu": "24.04.kubernetes1.31.1.cuda12.9.qcow2",
+    "cpu": "24.04.kubernetes1.31.1.cuda12.9.qcow2"
   },
-  "sshKeyIDs": ["cace0fae-a43d-40d4-94bd-07178102923e"],
+  "sshKeyIDs": ["your-sshkey-id"],
   "billingConfig": {
     "price": "FIXED_PRICE",
     "contract": "PAY_AS_YOU_GO"
   },
+  "debug": false,
+  "availableLocations": ["FIN-02", "FIN-03"],
   "labels": [],
   "startupScript": "base64 encoded startup script",
   "startupScriptEnv": {
-    "K8S_VERSION": "1.32.7",
     "MASTER_IP": "",
     "MASTER_PORT": "",
     "JOIN_TOKEN": "",
@@ -41,13 +42,13 @@ The cluster autoscaler for DataCrunch scales worker nodes.
 
 **NOTE**: In contrast to `DATACRUNCH_CLUSTER_CONFIG`, this file is not base64 encoded.
 
-Node groups must be defined with the `--nodes=<min-servers>:<max-servers>:<instance-type>:<region>:<name>` flag.
+Node groups must be defined with the `--nodes=<min-servers>:<max-servers>:<instance-type>:<name>` flag.
 
 Multiple flags will create multiple node pools. For example:
 ```
---nodes=1:5:1A6000.10V:FIN-01:as-test-a6000
---nodes=0:10:CPU.4V.16G:FIN-01:cpu-workers
---nodes=1:3:1H100.20V:FIN-01:gpu-h100-pool
+--nodes=1:5:1A6000.10V:as-test-a6000
+--nodes=0:10:CPU.4V.16G:cpu-workers
+--nodes=1:3:1H100.20V:gpu-h100-pool
 ```
 
 You can find a complete deployment sample under [examples/cluster-autoscaler-run-on-master.yaml](examples/cluster-autoscaler-run-on-master.yaml). This single file contains all required Kubernetes resources including namespace, RBAC, secrets, configmap, and deployment. Please be aware that you should change the values within this deployment to reflect your cluster:
