@@ -299,3 +299,11 @@ func extractAsgNameFromHostname(hostname string) (string, error) {
 	// TODO: Implement smarter legacy parsing if needed
 	return "", fmt.Errorf("hostname does not contain magic separator '%s' and legacy parsing not implemented: %s", separator, hostname)
 }
+
+// safeDeref safely dereferences an int64 pointer, returning the value or "nil" if pointer is nil
+func safeDeref(p *int64) interface{} {
+	if p == nil {
+		return "nil"
+	}
+	return *p
+}

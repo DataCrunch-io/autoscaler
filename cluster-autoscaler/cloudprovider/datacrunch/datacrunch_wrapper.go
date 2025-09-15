@@ -29,14 +29,6 @@ import (
 	klog "k8s.io/klog/v2"
 )
 
-// safeDeref safely dereferences an int64 pointer, returning the value or "nil" if pointer is nil
-func safeDeref(p *int64) interface{} {
-	if p == nil {
-		return "nil"
-	}
-	return *p
-}
-
 type instanceI interface {
 	ListInstances(input *instance.ListInstancesInput) ([]*instance.ListInstancesResponse, error)
 	CreateInstance(input *instance.CreateInstanceInput) (string, error)
@@ -175,9 +167,9 @@ func (ia *customInstance) GetInstanceByHostname(hostname string) (instance.ListI
 	// Define active statuses that should be considered
 	activeStatuses := map[string]bool{
 		string(instance.InstanceStatusNew):          true,
-		string(instance.InstanceStatusOrdered):     true,
+		string(instance.InstanceStatusOrdered):      true,
 		string(instance.InstanceStatusProvisioning): true,
-		string(instance.InstanceStatusRunning):     true,
+		string(instance.InstanceStatusRunning):      true,
 	}
 
 	for _, inst := range instances {
@@ -199,9 +191,9 @@ func (ia *customInstance) GetAllInstancesByDescription(description string) ([]in
 	// Define active statuses that should be considered for ASG membership
 	activeStatuses := map[string]bool{
 		string(instance.InstanceStatusNew):          true,
-		string(instance.InstanceStatusOrdered):     true,
+		string(instance.InstanceStatusOrdered):      true,
 		string(instance.InstanceStatusProvisioning): true,
-		string(instance.InstanceStatusRunning):     true,
+		string(instance.InstanceStatusRunning):      true,
 	}
 
 	filteredInstances := make([]instance.ListInstancesResponse, 0, len(instances))
@@ -228,19 +220,19 @@ func (ia *customInstance) GetAllInstancesByAsgName(asgName string) ([]instance.L
 	}
 
 	klog.Infof("[DEBUG] GetAllInstancesByAsgName found %d total instances from API", len(instances))
-	
+
 	// Log details of all instances for debugging
 	for i, inst := range instances {
-		klog.Infof("[DEBUG] Instance %d: hostname='%s', description='%s', status='%s'", 
+		klog.Infof("[DEBUG] Instance %d: hostname='%s', description='%s', status='%s'",
 			i+1, inst.Hostname, inst.Description, inst.Status)
 	}
 
 	// Define active statuses that should be considered for ASG membership
 	activeStatuses := map[string]bool{
 		string(instance.InstanceStatusNew):          true,
-		string(instance.InstanceStatusOrdered):     true,
+		string(instance.InstanceStatusOrdered):      true,
 		string(instance.InstanceStatusProvisioning): true,
-		string(instance.InstanceStatusRunning):     true,
+		string(instance.InstanceStatusRunning):      true,
 	}
 
 	filteredInstances := make([]instance.ListInstancesResponse, 0, len(instances))
@@ -250,7 +242,7 @@ func (ia *customInstance) GetAllInstancesByAsgName(asgName string) ([]instance.L
 			klog.Infof("[DEBUG] Skipping instance '%s' with inactive status: %s", inst.Hostname, inst.Status)
 			continue
 		}
-		
+
 		// Extract ASG name from hostname
 		extractedAsgName, err := extractAsgNameFromHostname(inst.Hostname)
 		if err != nil {
@@ -264,7 +256,7 @@ func (ia *customInstance) GetAllInstancesByAsgName(asgName string) ([]instance.L
 			}
 			continue
 		}
-		
+
 		// Match by extracted ASG name
 		if extractedAsgName == asgName {
 			klog.Infof("[DEBUG] Instance '%s' matched by extracted ASG name: %s", inst.Hostname, extractedAsgName)
@@ -276,12 +268,12 @@ func (ia *customInstance) GetAllInstancesByAsgName(asgName string) ([]instance.L
 
 	klog.Infof("[DEBUG] GetAllInstancesByAsgName returning %d filtered instances for ASG '%s'",
 		len(filteredInstances), asgName)
-	
+
 	// Log the final filtered instances
 	for i, inst := range filteredInstances {
-		klog.Infof("[DEBUG] Filtered instance %d: hostname='%s', description='%s', status='%s'", 
+		klog.Infof("[DEBUG] Filtered instance %d: hostname='%s', description='%s', status='%s'",
 			i+1, inst.Hostname, inst.Description, inst.Status)
 	}
-	
+
 	return filteredInstances, nil
 }
