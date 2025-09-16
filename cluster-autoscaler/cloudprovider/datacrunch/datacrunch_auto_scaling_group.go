@@ -28,8 +28,11 @@ import (
 
 type Asg struct {
 	AsgRef
-	minSize      int
-	maxSize      int
+	minSize int // lower bound set by spec
+	maxSize int // upper bound set by spec
+	// curSize is the provider's current target size cached by the manager.
+	// It is updated optimistically on successful create/delete operations and
+	// periodically reconciled in regenerate() from live API data.
 	curSize      int
 	instanceType string
 
@@ -81,16 +84,16 @@ func (ng *DatacrunchNodeGroup) AtomicIncreaseSize(delta int) error {
 func (ng *DatacrunchNodeGroup) Belongs(node *apiv1.Node) (bool, error) {
 	ref, err := instanceRefFromProviderId(node.Spec.ProviderID)
 	if err != nil {
-		klog.Infof("[DEBUG] Failed to parse providerID for node %s: %v", node.Name, err)
+		klog.V(4).Infof("Failed to parse providerID for node %s: %v", node.Name, err)
 		return false, err
 	}
 	targetAsg, err := ng.manager.GetAsgForInstance(ref)
 	if err != nil {
-		klog.Infof("[DEBUG] Error finding ASG for hostname %s: %v", ref.Hostname, err)
+		klog.V(4).Infof("Error finding ASG for hostname %s: %v", ref.Hostname, err)
 		return false, err
 	}
 	if targetAsg == nil {
-		klog.Infof("[DEBUG] No ASG found for hostname %s", ref.Hostname)
+		klog.V(4).Infof("No ASG found for hostname %s", ref.Hostname)
 		return false, fmt.Errorf("%s doesn't belong to a known asg", node.Name)
 	}
 
@@ -129,7 +132,11 @@ func (ng *DatacrunchNodeGroup) ForceDeleteNodes(nodes []*apiv1.Node) error {
 
 // DecreaseTargetSize decreases the target size of the node group.
 func (ng *DatacrunchNodeGroup) DecreaseTargetSize(delta int) error {
-	return ng.manager.ScaleDownAsg(ng.asg, delta)
+	// Per cloudprovider contract, delta must be negative
+	if delta >= 0 {
+		return fmt.Errorf("size decrease must be negative")
+	}
+	return ng.manager.ScaleDownAsg(ng.asg, -delta)
 }
 
 // Id returns asg id.
@@ -153,23 +160,23 @@ func (ng *DatacrunchNodeGroup) Nodes() ([]cloudprovider.Instance, error) {
 // that are started on the node by default, using manifest (most likely only
 // kube-proxy). Implementation optional.
 func (ng *DatacrunchNodeGroup) TemplateNodeInfo() (*schedulerframework.NodeInfo, error) {
-	klog.Infof("[DEBUG] TemplateNodeInfo called for ASG %s", ng.asg.Name)
+	klog.V(4).Infof("TemplateNodeInfo called for ASG %s", ng.asg.Name)
 	asgRef := AsgRef{Name: ng.asg.Name}
 	template, err := ng.manager.getAsgTemplate(asgRef)
 	if err != nil {
-		klog.Errorf("[DEBUG] Failed to get template for ASG %s: %v", ng.asg.Name, err)
+		klog.Errorf("Failed to get template for ASG %s: %v", ng.asg.Name, err)
 		return nil, err
 	}
-	klog.Infof("[DEBUG] Got template for ASG %s: instanceType=%s", ng.asg.Name, ng.asg.instanceType)
+	klog.V(4).Infof("Got template for ASG %s: instanceType=%s", ng.asg.Name, ng.asg.instanceType)
 
 	node, err := ng.manager.buildNodeFromTemplate(ng.asg, template)
 	if err != nil {
-		klog.Errorf("[DEBUG] Failed to build node from template for ASG %s: %v", ng.asg.Name, err)
+		klog.Errorf("Failed to build node from template for ASG %s: %v", ng.asg.Name, err)
 		return nil, err
 	}
 
 	nodeInfo := schedulerframework.NewNodeInfo(node, nil)
-	klog.Infof("[DEBUG] TemplateNodeInfo created successfully for ASG %s: nodeName=%s", ng.asg.Name, node.Name)
+	klog.V(4).Infof("TemplateNodeInfo created successfully for ASG %s: nodeName=%s", ng.asg.Name, node.Name)
 	return nodeInfo, nil
 }
 
@@ -181,7 +188,7 @@ func (ng *DatacrunchNodeGroup) Exist() bool {
 	asgRef := AsgRef{Name: ng.asg.Name}
 	asg, err := ng.manager.GetAsgByRef(asgRef)
 	if err != nil {
-		klog.Infof("[DEBUG] Error getting ASG by ref %s: %v", asgRef.Name, err)
+		klog.V(4).Infof("Error getting ASG by ref %s: %v", asgRef.Name, err)
 		return false
 	}
 	return asg != nil
@@ -189,7 +196,7 @@ func (ng *DatacrunchNodeGroup) Exist() bool {
 
 // Create creates the node group on the cloud provider side.
 func (ng *DatacrunchNodeGroup) Create() (cloudprovider.NodeGroup, error) {
-	klog.Infof("Creating ASG: %s", ng.asg.Name)
+	klog.V(4).Infof("Creating ASG: %s", ng.asg.Name)
 	// In DataCrunch, ASGs are logical - no explicit creation needed
 	return ng, nil
 }

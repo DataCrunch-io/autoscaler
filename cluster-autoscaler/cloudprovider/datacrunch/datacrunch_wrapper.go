@@ -92,7 +92,7 @@ func (ia *customInstanceAvailability) GetInstanceAvailabilityLocation(instanceTy
 
 	instanceAvailabilityResponses, err := ia.ListInstanceAvailability()
 	if err != nil {
-		klog.Errorf("[DEBUG] Error fetching availability data: %v\n", err)
+		klog.Errorf("Error fetching availability data: %v", err)
 		return "", err
 	}
 
@@ -106,7 +106,7 @@ func (ia *customInstanceAvailability) GetInstanceAvailabilityLocation(instanceTy
 		if slices.Contains(newLocations, availabilityData.LocationCode) {
 			for _, availability := range availabilityData.Availabilities {
 				if availability == instanceType {
-					klog.Infof("[DEBUG] Instance type %s is AVAILABLE in location %s\n", instanceType, availabilityData.LocationCode)
+					klog.V(4).Infof("Instance type %s is AVAILABLE in location %s", instanceType, availabilityData.LocationCode)
 					return availabilityData.LocationCode, nil
 				}
 			}
@@ -114,7 +114,7 @@ func (ia *customInstanceAvailability) GetInstanceAvailabilityLocation(instanceTy
 		}
 	}
 
-	klog.Warningf("[DEBUG] Location %s not found in availability data\n", newLocations)
+	klog.Warningf("Location %v not found in availability data", newLocations)
 	return "", nil
 }
 
@@ -125,29 +125,32 @@ func (ia *customInstanceAvailability) GetInstanceTypeDetails(instanceType string
 
 	instanceTypeDetails, err := ia.ListInstanceTypes()
 	if err != nil {
-		klog.Errorf("[DEBUG] Error fetching instance types: %v\n", err)
+		klog.Errorf("Error fetching instance types: %v", err)
 		return nil, err
 	}
 
-	// Add detailed debugging for each instance type
 	for _, it := range instanceTypeDetails {
-
-		// Look for your specific instance type
-		if it.InstanceType == instanceType {
-
-			klog.Infof("[DEBUG] MATCH FOUND for %s: CPU=%v, Memory=%vGB, GPU=%v\n",
-				instanceType, safeDeref(it.CPU.NumberOfCores), safeDeref(it.Memory.SizeInGigabytes), safeDeref(it.GPU.NumberOfGPUs))
-			return &InstanceResource{
-				InstanceType: it.InstanceType,
-				Arch:         "amd64",
-				CPU:          *it.CPU.NumberOfCores,
-				Memory:       *it.Memory.SizeInGigabytes * 1024 * 1024 * 1024,
-				GPU:          *it.GPU.NumberOfGPUs,
-			}, nil
+		if it.InstanceType != instanceType {
+			continue
 		}
-	}
-	klog.Errorf("[DEBUG] Instance type %s not found in API response\n", instanceType)
 
+		// Log using safeDeref, but validate before returning to avoid nil deref
+		klog.V(5).Infof("MATCH FOUND for %s: CPU=%v, Memory=%vGB, GPU=%v",
+			instanceType, safeDeref(it.CPU.NumberOfCores), safeDeref(it.Memory.SizeInGigabytes), safeDeref(it.GPU.NumberOfGPUs))
+
+		if it.CPU.NumberOfCores == nil || it.Memory.SizeInGigabytes == nil || it.GPU.NumberOfGPUs == nil {
+			return nil, fmt.Errorf("incomplete instance type data for %s", instanceType)
+		}
+
+		return &InstanceResource{
+			InstanceType: it.InstanceType,
+			Arch:         "amd64",
+			CPU:          *it.CPU.NumberOfCores,
+			Memory:       *it.Memory.SizeInGigabytes * 1024 * 1024 * 1024,
+			GPU:          *it.GPU.NumberOfGPUs,
+		}, nil
+	}
+	klog.Errorf("Instance type %s not found in API response", instanceType)
 	return nil, fmt.Errorf("instance type %s not found", instanceType)
 }
 
@@ -184,7 +187,7 @@ func (ia *customInstance) GetAllInstancesByDescription(description string) ([]in
 	// Get all instances without status filter to catch instances in transitional states
 	instances, err := ia.ListInstances(nil)
 	if err != nil {
-		klog.Errorf("[DEBUG] ListInstances API call failed: %v", err)
+		klog.Errorf("ListInstances API call failed: %v", err)
 		return []instance.ListInstancesResponse{}, err
 	}
 
@@ -204,7 +207,7 @@ func (ia *customInstance) GetAllInstancesByDescription(description string) ([]in
 		}
 	}
 
-	klog.Infof("[DEBUG] GetAllInstancesByDescription returning %d filtered instances for description '%s'",
+	klog.V(4).Infof("GetAllInstancesByDescription returning %d filtered instances for description '%s'",
 		len(filteredInstances), description)
 	return filteredInstances, nil
 }
@@ -215,15 +218,15 @@ func (ia *customInstance) GetAllInstancesByAsgName(asgName string) ([]instance.L
 	// Get all instances to include those in transitional states
 	instances, err := ia.ListInstances(nil)
 	if err != nil {
-		klog.Errorf("[DEBUG] ListInstances API call failed: %v", err)
+		klog.Errorf("ListInstances API call failed: %v", err)
 		return []instance.ListInstancesResponse{}, err
 	}
 
-	klog.Infof("[DEBUG] GetAllInstancesByAsgName found %d total instances from API", len(instances))
+	klog.V(4).Infof("GetAllInstancesByAsgName found %d total instances from API", len(instances))
 
 	// Log details of all instances for debugging
 	for i, inst := range instances {
-		klog.Infof("[DEBUG] Instance %d: hostname='%s', description='%s', status='%s'",
+		klog.V(6).Infof("Instance %d: hostname='%s', description='%s', status='%s'",
 			i+1, inst.Hostname, inst.Description, inst.Status)
 	}
 
@@ -239,39 +242,39 @@ func (ia *customInstance) GetAllInstancesByAsgName(asgName string) ([]instance.L
 	for _, inst := range instances {
 		// Only process instances in active states
 		if !activeStatuses[inst.Status] {
-			klog.Infof("[DEBUG] Skipping instance '%s' with inactive status: %s", inst.Hostname, inst.Status)
+			klog.V(6).Infof("Skipping instance '%s' with inactive status: %s", inst.Hostname, inst.Status)
 			continue
 		}
 
 		// Extract ASG name from hostname
 		extractedAsgName, err := extractAsgNameFromHostname(inst.Hostname)
 		if err != nil {
-			klog.Infof("[DEBUG] Failed to extract ASG from hostname '%s': %v, trying description fallback", inst.Hostname, err)
+			klog.V(5).Infof("Failed to extract ASG from hostname '%s': %v, trying description fallback", inst.Hostname, err)
 			// If hostname doesn't follow new pattern, fall back to description check for backward compatibility
 			if inst.Description == asgName {
-				klog.Infof("[DEBUG] Instance '%s' matched by description: %s", inst.Hostname, inst.Description)
+				klog.V(6).Infof("Instance '%s' matched by description: %s", inst.Hostname, inst.Description)
 				filteredInstances = append(filteredInstances, *inst)
 			} else {
-				klog.Infof("[DEBUG] Instance '%s' description '%s' does not match ASG '%s'", inst.Hostname, inst.Description, asgName)
+				klog.V(6).Infof("Instance '%s' description '%s' does not match ASG '%s'", inst.Hostname, inst.Description, asgName)
 			}
 			continue
 		}
 
 		// Match by extracted ASG name
 		if extractedAsgName == asgName {
-			klog.Infof("[DEBUG] Instance '%s' matched by extracted ASG name: %s", inst.Hostname, extractedAsgName)
+			klog.V(6).Infof("Instance '%s' matched by extracted ASG name: %s", inst.Hostname, extractedAsgName)
 			filteredInstances = append(filteredInstances, *inst)
 		} else {
-			klog.Infof("[DEBUG] Instance '%s' extracted ASG '%s' does not match target '%s'", inst.Hostname, extractedAsgName, asgName)
+			klog.V(6).Infof("Instance '%s' extracted ASG '%s' does not match target '%s'", inst.Hostname, extractedAsgName, asgName)
 		}
 	}
 
-	klog.Infof("[DEBUG] GetAllInstancesByAsgName returning %d filtered instances for ASG '%s'",
+	klog.V(4).Infof("GetAllInstancesByAsgName returning %d filtered instances for ASG '%s'",
 		len(filteredInstances), asgName)
 
 	// Log the final filtered instances
 	for i, inst := range filteredInstances {
-		klog.Infof("[DEBUG] Filtered instance %d: hostname='%s', description='%s', status='%s'",
+		klog.V(6).Infof("Filtered instance %d: hostname='%s', description='%s', status='%s'",
 			i+1, inst.Hostname, inst.Description, inst.Status)
 	}
 

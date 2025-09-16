@@ -118,18 +118,18 @@ func (m *DatacrunchManager) Refresh() error {
 }
 
 func (m *DatacrunchManager) updateAsgInstanceCache(asg *Asg) error {
-	klog.V(4).Infof("[DEBUG] Refreshing ASG %s state from DataCrunch API", asg.Name)
+	klog.V(4).Infof("Refreshing ASG %s state from DataCrunch API", asg.Name)
 
 	instances, err := m.allASGRunningInstances(asg.Name)
 	if err != nil {
-		klog.Errorf("[DEBUG] Failed to fetch instances for ASG %s: %v", asg.Name, err)
+		klog.Errorf("Failed to fetch instances for ASG %s: %v", asg.Name, err)
 		return err
 	}
 	currentCount := len(instances)
 
 	// check if current count is different from desired count
 
-	klog.V(4).Infof("[DEBUG] ASG %s currently has %d running instances", asg.Name, currentCount)
+	klog.V(4).Infof("ASG %s currently has %d running instances", asg.Name, currentCount)
 
 	return nil
 }
@@ -200,7 +200,7 @@ func (m *DatacrunchManager) GetAsgNodes(asg *Asg) ([]string, error) {
 		providerID := datacrunchProviderIDPrefix + inst.Location + "/" + inst.Hostname
 		providerIDs = append(providerIDs, providerID)
 	}
-	klog.Infof("[DEBUG] GetAsgNodes for %s: returning %d provider IDs", asg.Name, len(providerIDs))
+	klog.V(5).Infof("GetAsgNodes for %s: returning %d provider IDs", asg.Name, len(providerIDs))
 	return providerIDs, nil
 }
 
@@ -254,7 +254,7 @@ func (m *DatacrunchManager) cleanupCreatedInstances(instanceIDs []string) {
 		if err != nil {
 			klog.Errorf("Failed to cleanup instance %s: %v", instanceID, err)
 		} else {
-			klog.Infof("Cleaned up instance %s", instanceID)
+			klog.V(5).Infof("Cleaned up instance %s", instanceID)
 		}
 	}
 }
@@ -265,7 +265,8 @@ func (m *DatacrunchManager) GetAvailableMachineTypes() ([]string, error) {
 		return nil, err
 	}
 
-	types := make([]string, len(instanceTypes))
+	// Preallocate capacity and append to avoid leading empty entries
+	types := make([]string, 0, len(instanceTypes))
 	for _, it := range instanceTypes {
 		types = append(types, it.InstanceType)
 	}
@@ -337,12 +338,12 @@ func (m *DatacrunchManager) getInstancesForAsg(ref AsgRef) ([]cloudprovider.Inst
 // buildNodeFromTemplate builds a Kubernetes node from ASG template
 // not used
 func (m *DatacrunchManager) buildNodeFromTemplate(asg *Asg, template *asgTemplate) (*apiv1.Node, error) {
-	klog.Infof("[DEBUG] buildNodeFromTemplate for ASG %s: CPU=%d, Memory=%d, GPU=%d",
+	klog.V(4).Infof("buildNodeFromTemplate for ASG %s: CPU=%d, Memory=%d, GPU=%d",
 		asg.Name, template.InstanceType.CPU, template.InstanceType.Memory, template.InstanceType.GPU)
 
 	node := &apiv1.Node{}
 	nodeName := fmt.Sprintf("asg-%s-%d", asg.Name, rand.Int63())
-	klog.Infof("[DEBUG] Generated template node name: %s", nodeName)
+	klog.V(5).Infof("Generated template node name: %s", nodeName)
 
 	labels := map[string]string{
 		"kubernetes.io/arch":               template.InstanceType.Arch,
@@ -363,7 +364,7 @@ func (m *DatacrunchManager) buildNodeFromTemplate(asg *Asg, template *asgTemplat
 	// Memory is already in bytes from the wrapper conversion
 	memoryBytes := template.InstanceType.Memory
 	memoryGi := memoryBytes / (1024 * 1024 * 1024)
-	klog.Infof("[DEBUG] Setting node capacity: CPU=%d cores, Memory=%dGi (%d bytes), Pods=%d",
+	klog.V(5).Infof("Setting node capacity: CPU=%d cores, Memory=%dGi (%d bytes), Pods=%d",
 		template.InstanceType.CPU, memoryGi, memoryBytes, defaultPodAmountsLimit)
 
 	capacity := apiv1.ResourceList{
@@ -374,10 +375,10 @@ func (m *DatacrunchManager) buildNodeFromTemplate(asg *Asg, template *asgTemplat
 
 	// Add GPU resources if available
 	if template.InstanceType.GPU > 0 {
-		klog.Infof("[DEBUG] Adding GPU resources: %d nvidia.com/gpu", template.InstanceType.GPU)
+		klog.V(4).Infof("Adding GPU resources: %d nvidia.com/gpu", template.InstanceType.GPU)
 		capacity[apiv1.ResourceName("nvidia.com/gpu")] = *resource.NewQuantity(template.InstanceType.GPU, resource.DecimalSI)
 	} else {
-		klog.Infof("[DEBUG] No GPU resources for instance type %s", asg.instanceType)
+		klog.V(4).Infof("No GPU resources for instance type %s", asg.instanceType)
 	}
 
 	node.Status = apiv1.NodeStatus{
@@ -396,7 +397,7 @@ func (m *DatacrunchManager) buildNodeFromTemplate(asg *Asg, template *asgTemplat
 	// ---- Taints ----
 	node.Spec.Taints = append([]apiv1.Taint(nil), m.cfg.Taints...)
 
-	klog.Infof("[DEBUG] Template node created successfully for ASG %s: %s", asg.Name, nodeName)
+	klog.V(4).Infof("Template node created successfully for ASG %s: %s", asg.Name, nodeName)
 	return node, nil
 }
 
@@ -408,13 +409,13 @@ func (m *DatacrunchManager) getAsgTemplate(asgRef AsgRef) (*asgTemplate, error) 
 		return nil, err
 	}
 
-	klog.Infof("[DEBUG] About to call GetInstanceTypeDetails for ASG %s, instanceType: %s", asg.Name, asg.instanceType)
+	klog.V(5).Infof("About to call GetInstanceTypeDetails for ASG %s, instanceType: %s", asg.Name, asg.instanceType)
 	instanceDetails, err := m.dcService.GetInstanceTypeDetails(asg.instanceType)
 	if err != nil {
-		klog.Errorf("[DEBUG] Failed to get instance type details for ASG %s, type: %s, %v", asg.Name, asg.instanceType, err)
+		klog.Errorf("Failed to get instance type details for ASG %s, type: %s, %v", asg.Name, asg.instanceType, err)
 		return nil, err
 	}
-	klog.Infof("[DEBUG] Successfully got instance type details for ASG %s", asg.Name)
+	klog.V(4).Infof("Successfully got instance type details for ASG %s", asg.Name)
 
 	return &asgTemplate{
 		InstanceType: instanceDetails,

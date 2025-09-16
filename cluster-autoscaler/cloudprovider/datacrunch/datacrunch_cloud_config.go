@@ -92,11 +92,5 @@ func (cfg *cloudConfig) isValid() bool {
 		return false
 	}
 
-	// Validate debug is a boolean
-	if cfg.Debug != true && cfg.Debug != false {
-		klog.Errorf("Debug must be a boolean")
-		return false
-	}
-
 	return true
 }

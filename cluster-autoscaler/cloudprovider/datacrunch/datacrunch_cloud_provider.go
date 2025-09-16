@@ -70,7 +70,7 @@ func (d *DatacrunchCloudProvider) NodeGroups() []cloudprovider.NodeGroup {
 		groups = append(groups, &DatacrunchNodeGroup{asg: asg, manager: d.manager})
 	}
 
-	klog.Infof("[DEBUG] NodeGroups() returning %d node groups", len(groups))
+	klog.V(4).Infof("NodeGroups() returning %d node groups", len(groups))
 	return groups
 }
 
@@ -158,7 +158,7 @@ func (d *DatacrunchCloudProvider) Cleanup() error {
 
 // Refresh is called before every main loop and can be used to dynamically update cloud provider state
 func (d *DatacrunchCloudProvider) Refresh() error {
-	klog.Info("[DEBUG] DataCrunch cloud provider refresh called - checking ASG states")
+	klog.V(4).Info("DataCrunch cloud provider refresh called - checking ASG states")
 
 	return d.manager.Refresh()
 }

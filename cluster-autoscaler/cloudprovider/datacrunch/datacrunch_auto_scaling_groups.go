@@ -140,7 +140,7 @@ func (m *autoScalingGroups) FindASGForInstance(ref *InstanceRef) (*Asg, error) {
 	// This handles cases where InstanceRef might have different ProviderID values
 	for cachedRef, asg := range m.instanceToAsg {
 		if cachedRef.Hostname == ref.Hostname {
-			klog.Infof("[DEBUG] Found ASG %s for hostname %s via hostname lookup", asg.Name, ref.Hostname)
+			klog.V(4).Infof("Found ASG %s for hostname %s via hostname lookup", asg.Name, ref.Hostname)
 			return asg, nil
 		}
 	}
@@ -149,69 +149,56 @@ func (m *autoScalingGroups) FindASGForInstance(ref *InstanceRef) (*Asg, error) {
 }
 
 func (m *autoScalingGroups) regenerate() error {
+	// Copy specs under lock to avoid holding the lock during API calls
 	m.cacheMutex.Lock()
-	defer m.cacheMutex.Unlock()
-
-	klog.Infof("[DEBUG] regenerate() called with %d asgNodeGroupSpecs", len(m.asgNodeGroupSpecs))
-	for ref, spec := range m.asgNodeGroupSpecs {
-		klog.Infof("[DEBUG] ASG spec in regenerate: %s -> %s", ref.Name, spec)
+	specs := make([]string, 0, len(m.asgNodeGroupSpecs))
+	for _, spec := range m.asgNodeGroupSpecs {
+		specs = append(specs, spec)
 	}
+	m.cacheMutex.Unlock()
+
+	klog.V(4).Infof("regenerate() called with %d asgNodeGroupSpecs", len(specs))
 
 	newInstanceToAsg := make(map[InstanceRef]*Asg)
 	newAsgToInstances := make(map[AsgRef][]InstanceRef)
 	newRegisteredAsgs := make(map[AsgRef]*Asg)
 
-	for _, spec := range m.asgNodeGroupSpecs {
-		klog.Infof("[DEBUG] Processing spec in regenerate: %s", spec)
+	for _, spec := range specs {
+		klog.V(5).Infof("Processing spec in regenerate: %s", spec)
 		asg, err := m.buildASGFromSpec(spec)
 		if err != nil {
 			klog.Errorf("failed to build ASG from spec: %v", err)
 			continue
 		}
-		klog.Infof("[DEBUG] Built ASG %s from spec in regenerate", asg.Name)
+		klog.V(5).Infof("Built ASG %s from spec in regenerate", asg.Name)
 		newRegisteredAsgs[asg.AsgRef] = asg
+
 		// get all instances for the asg using hostname-based matching (more reliable)
-		klog.Infof("[DEBUG] About to call GetAllInstancesByAsgName for ASG %s", asg.Name)
+		klog.V(5).Infof("About to call GetAllInstancesByAsgName for ASG %s", asg.Name)
 		deployedInstances, err := m.dcService.GetAllInstancesByAsgName(asg.Name)
 		if err != nil {
 			klog.Errorf("failed to get instances for ASG %s: %v", asg.Name, err)
 			continue
 		}
-		klog.Infof("[DEBUG] Found %d instances for ASG %s", len(deployedInstances), asg.Name)
+		klog.V(4).Infof("Found %d instances for ASG %s", len(deployedInstances), asg.Name)
 		for _, deployedInstance := range deployedInstances {
-			// Create consistent InstanceRef with both hostname and provider ID
 			providerID := datacrunchProviderIDPrefix + deployedInstance.Location + "/" + deployedInstance.Hostname
-			instanceRef := InstanceRef{
-				Hostname:   deployedInstance.Hostname,
-				ProviderID: providerID,
-			}
+			instanceRef := InstanceRef{Hostname: deployedInstance.Hostname, ProviderID: providerID}
 			newInstanceToAsg[instanceRef] = asg
 			newAsgToInstances[asg.AsgRef] = append(newAsgToInstances[asg.AsgRef], instanceRef)
 		}
-		// update current size
 		asg.curSize = len(deployedInstances)
-		klog.Infof("[DEBUG] Set ASG %s curSize to %d based on discovered instances", asg.Name, asg.curSize)
+		klog.V(4).Infof("Set ASG %s curSize to %d based on discovered instances", asg.Name, asg.curSize)
 	}
 
-	// Unregister no longer existing Node Groups specs
-	for _, asg := range m.registeredAsgs {
-		if _, asgExists := newRegisteredAsgs[asg.AsgRef]; !asgExists {
-			if _, asgExists := m.asgNodeGroupSpecs[asg.AsgRef]; !asgExists {
-				klog.Infof("[DEBUG] Unregistering ASG %s", asg.Name)
-				m.Unregister(asg)
-			}
-		}
-	}
-
+	// Swap new state under lock
+	m.cacheMutex.Lock()
 	m.registeredAsgs = newRegisteredAsgs
 	m.instanceToAsg = newInstanceToAsg
 	m.asgToInstances = newAsgToInstances
+	m.cacheMutex.Unlock()
 
-	klog.Infof("[DEBUG] regenerate() finished with %d registered ASGs", len(m.registeredAsgs))
-	for ref := range m.registeredAsgs {
-		klog.Infof("[DEBUG] Registered ASG after regenerate: %s", ref.Name)
-	}
-
+	klog.V(4).Infof("regenerate() finished with %d registered ASGs", len(newRegisteredAsgs))
 	return nil
 }
 
@@ -232,39 +219,40 @@ func (m *autoScalingGroups) buildASGFromSpec(spec string) (*Asg, error) {
 }
 
 func (m *autoScalingGroups) parseASGNodeGroupSpecs(specs []string) error {
-	klog.Infof("[DEBUG] parseASGNodeGroupSpecs called with %d specs", len(specs))
+	klog.V(5).Infof("parseASGNodeGroupSpecs called with %d specs", len(specs))
 	for _, spec := range specs {
-		klog.Infof("[DEBUG] Processing spec: %s", spec)
+		klog.V(5).Infof("Processing spec: %s", spec)
 		asg, err := m.buildASGFromSpec(spec)
 		if err != nil {
 			return err
 		}
-		klog.Infof("[DEBUG] Registering ASG %s", asg.Name)
+		klog.V(4).Infof("Registering ASG %s", asg.Name)
 		registeredAsg := m.Register(asg)
-		klog.Infof("[DEBUG] ASG %s registered successfully", registeredAsg.Name)
+		klog.V(5).Infof("ASG %s registered successfully", registeredAsg.Name)
 
 		// Store the spec for this ASG
 		m.asgNodeGroupSpecs[asg.AsgRef] = spec
-		klog.Infof("[DEBUG] Stored spec for ASG %s: %s", asg.Name, spec)
+		klog.V(5).Infof("Stored spec for ASG %s: %s", asg.Name, spec)
 	}
-	klog.Infof("[DEBUG] parseASGNodeGroupSpecs finished, total asgNodeGroupSpecs: %d", len(m.asgNodeGroupSpecs))
+	klog.V(4).Infof("parseASGNodeGroupSpecs finished, total asgNodeGroupSpecs: %d", len(m.asgNodeGroupSpecs))
 	return nil
 }
 
 func (m *autoScalingGroups) scaleUpAsg(asg *Asg, delta int) error {
-	klog.Infof("increase ASG:%s with %d nodes", asg.Name, delta)
+	klog.V(4).Infof("increase ASG:%s with %d nodes", asg.Name, delta)
 	if delta <= 0 {
 		return fmt.Errorf("size increase must be positive")
 	}
+	// Validate size constraints under lock
+	m.cacheMutex.Lock()
 	size := asg.curSize
-	if int(size)+delta > asg.maxSize {
-		return fmt.Errorf("size increase is too large - desired:%d max:%d", int(size)+delta, asg.maxSize)
+	max := asg.maxSize
+	m.cacheMutex.Unlock()
+	if int(size)+delta > max {
+		return fmt.Errorf("size increase is too large - desired:%d max:%d", int(size)+delta, max)
 	}
 
-	m.cacheMutex.Lock()
-	defer m.cacheMutex.Unlock()
-
-	// check if required resources are available
+	// check if required resources are available (no lock held during API calls)
 	location, err := m.dcService.GetInstanceAvailabilityLocation(asg.instanceType, asg.AvailabilityLocations)
 	if err != nil {
 		return fmt.Errorf("failed to check if instance type %s is available: %v", asg.instanceType, err)
@@ -272,7 +260,7 @@ func (m *autoScalingGroups) scaleUpAsg(asg *Asg, delta int) error {
 	if location == "" {
 		return fmt.Errorf("instance type %s is not available in any of the locations", asg.instanceType)
 	}
-	klog.Infof("instance type %s is available in location %s", asg.instanceType, location)
+	klog.V(4).Infof("instance type %s is available in location %s", asg.instanceType, location)
 
 	// prepare node config for each server
 	nodeConfig, err := m.getNodeConfigForAsg(asg)
@@ -280,50 +268,52 @@ func (m *autoScalingGroups) scaleUpAsg(asg *Asg, delta int) error {
 		return fmt.Errorf("failed to get node config for ASG %s: %v", asg.Name, err)
 	}
 
-	// datcrunch doesnt support group server creation, we need to create each server manually
-	// we need concurrent like create server and if error then need reduce actual delta
-	waitGroup := sync.WaitGroup{}
+	// Create instances concurrently, collect results, and update cache afterwards
+	var wg sync.WaitGroup
 	errsCh := make(chan error, delta)
+	createdRefs := make(chan InstanceRef, delta)
 	for i := 0; i < delta; i++ {
-		waitGroup.Add(1)
-		go func(index int, location string) {
-			defer waitGroup.Done()
-			klog.Infof("[DEBUG] Creating instance %d/%d for ASG %s", index+1, delta, asg.Name)
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			klog.V(5).Infof("Creating instance %d/%d for ASG %s", index+1, delta, asg.Name)
 			_, hostname, err := m.createInstanceForAsg(asg, nodeConfig, location)
 			if err != nil {
-				klog.Errorf("[DEBUG] Failed to create instance %d for ASG %s: %v", index+1, asg.Name, err)
+				klog.Errorf("Failed to create instance %d for ASG %s: %v", index+1, asg.Name, err)
 				errsCh <- err
-			} else {
-				// update cache with consistent InstanceRef including provider ID
-				providerID := datacrunchProviderIDPrefix + location + "/" + hostname
-				instanceRef := InstanceRef{
-					Hostname:   hostname,
-					ProviderID: providerID,
-				}
-				m.instanceToAsg[instanceRef] = asg
-				m.asgToInstances[asg.AsgRef] = append(m.asgToInstances[asg.AsgRef], instanceRef)
+				return
 			}
-		}(i, location)
+			providerID := datacrunchProviderIDPrefix + location + "/" + hostname
+			createdRefs <- InstanceRef{Hostname: hostname, ProviderID: providerID}
+		}(i)
 	}
-	waitGroup.Wait()
+	wg.Wait()
 	close(errsCh)
+	close(createdRefs)
 
+	// Collect results
 	errs := make([]error, 0, delta)
+	refs := make([]InstanceRef, 0, delta)
 	for err := range errsCh {
 		errs = append(errs, err)
 	}
+	for ref := range createdRefs {
+		refs = append(refs, ref)
+	}
+
+	// Update cache and curSize for successful creations
+	m.cacheMutex.Lock()
+	for _, ref := range refs {
+		m.instanceToAsg[ref] = asg
+		m.asgToInstances[asg.AsgRef] = append(m.asgToInstances[asg.AsgRef], ref)
+	}
+	asg.curSize += len(refs)
+	m.cacheMutex.Unlock()
+	klog.V(4).Infof("Updated ASG %s curSize to %d after creating %d instances", asg.Name, asg.curSize, len(refs))
+
 	if len(errs) > 0 {
 		return fmt.Errorf("failed to create all servers: %w", errors.Join(errs...))
 	}
-
-	// Update curSize to reflect successful creations
-	// Note: curSize will be refreshed from API in next regenerate() call,
-	// but we update it here for immediate consistency
-	successfulCreations := delta - len(errs)
-	asg.curSize += successfulCreations
-	klog.Infof("[DEBUG] Updated ASG %s curSize to %d after creating %d instances",
-		asg.Name, asg.curSize, successfulCreations)
-
 	return nil
 }
 
@@ -352,14 +342,10 @@ func (m *autoScalingGroups) getNodeConfigForAsg(asg *Asg) (*nodeConfig, error) {
 	}
 
 	// Copy additional volumes
-	for i, vol := range m.cfg.AdditionalVolumes {
-		nodeConfig.Volumes[i] = vol
-	}
+	copy(nodeConfig.Volumes, m.cfg.AdditionalVolumes)
 
 	// Copy taints
-	for i, taint := range m.cfg.Taints {
-		nodeConfig.Taints[i] = taint
-	}
+	copy(nodeConfig.Taints, m.cfg.Taints)
 
 	return nodeConfig, nil
 }
@@ -373,13 +359,13 @@ func (m *autoScalingGroups) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 	providerID := fmt.Sprintf("datacrunch://%s/%s", location, hostname)
 	startupScriptID, err := m.createOrGetStartupScript(asg, nodeConfig, providerID)
 	if err != nil {
-		klog.Errorf("[DEBUG] Failed to create startup script for ASG %s: %v", asg.Name, err)
+		klog.Errorf("Failed to create startup script for ASG %s: %v", asg.Name, err)
 		return "", hostname, err
 	}
 
 	// Check if startup script ID is empty
 	if startupScriptID == "" {
-		klog.Errorf("[DEBUG] Startup script creation returned empty ID - cannot proceed with instance creation")
+		klog.Errorf("Startup script creation returned empty ID - cannot proceed with instance creation")
 		return "", hostname, errors.New("startup script creation returned empty ID")
 	}
 
@@ -396,13 +382,13 @@ func (m *autoScalingGroups) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 	if isGPU {
 		image = m.cfg.Image.GPU
 		if image == "" {
-			klog.Errorf("[DEBUG] No GPU image configured for instance type %s", asg.instanceType)
+			klog.Errorf("No GPU image configured for instance type %s", asg.instanceType)
 			return "", hostname, fmt.Errorf("no GPU image configured for instance type %s", asg.instanceType)
 		}
 	} else {
 		image = m.cfg.Image.CPU
 		if image == "" {
-			klog.Errorf("[DEBUG] No CPU image configured for instance type %s", asg.instanceType)
+			klog.Errorf("No CPU image configured for instance type %s", asg.instanceType)
 			return "", hostname, fmt.Errorf("no CPU image configured for instance type %s", asg.instanceType)
 		}
 	}
@@ -443,12 +429,12 @@ func (m *autoScalingGroups) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 	// TODO: Delete before official release
 	// Debug: Log full request body
 	if requestBody, err := json.MarshalIndent(input, "", "  "); err == nil {
-		klog.Infof("[DEBUG] CreateInstance request body:\n%s", string(requestBody))
+		klog.V(7).Infof("CreateInstance request body:\n%s", string(requestBody))
 	}
 
 	instanceID, err := m.dcService.CreateInstance(&input)
 	if err != nil {
-		klog.Errorf("[DEBUG] DataCrunch API call failed for instance %s: %v", hostname, err)
+		klog.Errorf("DataCrunch API call failed for instance %s: %v", hostname, err)
 		return "", hostname, fmt.Errorf("failed to create instance: %v", err)
 	}
 
@@ -464,13 +450,16 @@ func (m *autoScalingGroups) createOrGetStartupScript(asg *Asg, nodeConfig *nodeC
 		return "", fmt.Errorf("failed to decode startup script: %v", err)
 	}
 
-	// patch the script
-	startupScriptEnv := m.cfg.StartupScriptEnv
+	// Prepare a fresh env map to avoid mutating shared config and for concurrency safety
+	startupScriptEnv := make(map[string]string, len(m.cfg.StartupScriptEnv)+2)
+	for k, v := range m.cfg.StartupScriptEnv {
+		startupScriptEnv[strings.ToUpper(k)] = v
+	}
 	startupScriptEnv["PROVIDER_ID"] = providerID
 	labels := convertConfigLabelsToK8sLabels(nodeConfig.Labels, asg)
 	startupScriptEnv["LABELS"] = labels
 
-	// patch the script
+	// Patch the script with env values
 	_patchedBase64Script := patchScript(_base64Script, startupScriptEnv)
 	// stringify the script
 	_scriptsUtf8 := string(_patchedBase64Script)
@@ -482,7 +471,7 @@ func (m *autoScalingGroups) createOrGetStartupScript(asg *Asg, nodeConfig *nodeC
 
 	scriptID, err := m.dcService.CreateStartScript(input)
 	if err != nil {
-		klog.Errorf("[DEBUG] CreateStartScript API call failed: %v", err)
+		klog.Errorf("CreateStartScript API call failed: %v", err)
 		return "", fmt.Errorf("failed to create startup script: %v", err)
 	}
 
@@ -494,9 +483,9 @@ func (m *autoScalingGroups) scaleDownAsg(asg *Asg, count int) error {
 		return nil
 	}
 
-	klog.Infof("Scaling down ASG %s by %d instances", asg.Name, count)
+	klog.V(4).Infof("Scaling down ASG %s by %d instances", asg.Name, count)
 
-	// Get current instances using hostname-based matching
+	// Get current instances using hostname-based matching (no lock held during API calls)
 	instances, err := m.dcService.GetAllInstancesByAsgName(asg.Name)
 	if err != nil {
 		return fmt.Errorf("failed to get instances for ASG %s: %v", asg.Name, err)
@@ -508,30 +497,23 @@ func (m *autoScalingGroups) scaleDownAsg(asg *Asg, count int) error {
 
 	// Validate we don't go below min size
 	if len(instances)-count < asg.minSize {
-		return fmt.Errorf("scaling down by %d would go below min size %d (current: %d)",
-			count, asg.minSize, len(instances))
+		return fmt.Errorf("scaling down by %d would go below min size %d (current: %d)", count, asg.minSize, len(instances))
 	}
 
-	m.cacheMutex.Lock()
-	defer m.cacheMutex.Unlock()
-
-	wg := sync.WaitGroup{}
+	var wg sync.WaitGroup
 	errsCh := make(chan error, count)
+	deletedHostnames := make(chan string, count)
 
 	// Collect instances to delete and their IDs
 	instancesToDelete := make([]struct {
 		ID       string
 		Hostname string
 	}, 0, count)
-
 	for i := 0; i < count && i < len(instances); i++ {
 		instancesToDelete = append(instancesToDelete, struct {
 			ID       string
 			Hostname string
-		}{
-			ID:       instances[i].ID,
-			Hostname: instances[i].Hostname,
-		})
+		}{ID: instances[i].ID, Hostname: instances[i].Hostname})
 	}
 
 	// Delete instances concurrently
@@ -539,42 +521,63 @@ func (m *autoScalingGroups) scaleDownAsg(asg *Asg, count int) error {
 		wg.Add(1)
 		go func(instanceID, hostname string) {
 			defer wg.Done()
-			err := m.dcService.PerformInstanceAction(&instance.InstanceActionInput{
-				Action: instance.InstanceActionDelete,
-				ID:     instanceID,
-			})
+			err := m.dcService.PerformInstanceAction(&instance.InstanceActionInput{Action: instance.InstanceActionDelete, ID: instanceID})
 			if err != nil {
 				klog.Errorf("Failed to delete instance %s: %v", instanceID, err)
 				errsCh <- err
-			} else {
-				klog.Infof("Successfully deleted instance %s from ASG %s", instanceID, asg.Name)
+				return
 			}
+			klog.V(4).Infof("Successfully deleted instance %s from ASG %s", instanceID, asg.Name)
+			deletedHostnames <- hostname
 		}(inst.ID, inst.Hostname)
 	}
 	wg.Wait()
 	close(errsCh)
+	close(deletedHostnames)
 
-	// Check for errors
+	// Gather results
 	errs := make([]error, 0, count)
+	successHostnames := make([]string, 0, count)
 	for err := range errsCh {
 		errs = append(errs, err)
 	}
+	for hn := range deletedHostnames {
+		successHostnames = append(successHostnames, hn)
+	}
 
-	// Calculate successful deletions
-	successfulDeletions := len(instancesToDelete) - len(errs)
-
-	if len(errs) > 0 && successfulDeletions == 0 {
+	if len(errs) > 0 && len(successHostnames) == 0 {
 		return fmt.Errorf("failed to delete any instances: %w", errors.Join(errs...))
 	}
 
-	// Update cache and curSize only for successful deletions
-	for i := 0; i < successfulDeletions; i++ {
-		m.deleteInstanceRef(InstanceRef{Hostname: instancesToDelete[i].Hostname})
-		asg.curSize--
+	// Update cache and curSize for successful deletions under lock
+	m.cacheMutex.Lock()
+	for _, hostname := range successHostnames {
+		// Find exact cached ref and owning ASG
+		var cachedRef *InstanceRef
+		for ref := range m.instanceToAsg {
+			if ref.Hostname == hostname {
+				r := ref // copy
+				cachedRef = &r
+				break
+			}
+		}
+		if cachedRef != nil {
+			asgRef := m.instanceToAsg[*cachedRef].AsgRef
+			delete(m.instanceToAsg, *cachedRef)
+			refs := m.asgToInstances[asgRef]
+			for i, r := range refs {
+				if r.Hostname == hostname {
+					m.asgToInstances[asgRef] = append(refs[:i], refs[i+1:]...)
+					break
+				}
+			}
+			asg.curSize--
+		}
 	}
+	m.cacheMutex.Unlock()
 
-	deletedCount := successfulDeletions
-	klog.Infof("Successfully deleted %d instances from ASG %s", deletedCount, asg.Name)
+	deletedCount := len(successHostnames)
+	klog.V(4).Infof("Successfully deleted %d instances from ASG %s", deletedCount, asg.Name)
 
 	if deletedCount == 0 {
 		return fmt.Errorf("failed to delete any instances from ASG %s", asg.Name)
@@ -625,68 +628,63 @@ func (m *autoScalingGroups) InstanceRefsForAsg(ref AsgRef) ([]InstanceRef, error
 }
 
 func (m *autoScalingGroups) InstancesForAsg(ref AsgRef) ([]*instance.ListInstancesResponse, error) {
+	// Copy refs under lock, do API calls without holding the lock
 	m.cacheMutex.Lock()
-	defer m.cacheMutex.Unlock()
-
-	var instanceRefs []InstanceRef
-	var found bool
-	if instanceRefs, found = m.asgToInstances[ref]; !found {
-		klog.Infof("[DEBUG] No instances found in cache for ASG %s, returning empty list", ref.Name)
+	refs0, found := m.asgToInstances[ref]
+	refs := append([]InstanceRef(nil), refs0...)
+	m.cacheMutex.Unlock()
+	if !found {
+		klog.V(5).Infof("No instances found in cache for ASG %s, returning empty list", ref.Name)
 		return []*instance.ListInstancesResponse{}, nil
 	}
 
-	instances := make([]*instance.ListInstancesResponse, 0, len(instanceRefs))
-	for _, instanceRef := range instanceRefs {
-		instance, err := m.dcService.GetInstanceByHostname(instanceRef.Hostname)
+	instances := make([]*instance.ListInstancesResponse, 0, len(refs))
+	for _, r := range refs {
+		inst, err := m.dcService.GetInstanceByHostname(r.Hostname)
 		if err != nil {
-			klog.Errorf("[DEBUG] Failed to get instance %s for ASG %s: %v", instanceRef.Hostname, ref.Name, err)
+			klog.Errorf("Failed to get instance %s for ASG %s: %v", r.Hostname, ref.Name, err)
 			continue
 		}
-		instances = append(instances, &instance)
+		instCopy := inst
+		instances = append(instances, &instCopy)
 	}
 
-	klog.Infof("[DEBUG] InstancesForAsg %s: returning %d instances", ref.Name, len(instances))
+	klog.V(5).Infof("InstancesForAsg %s: returning %d instances", ref.Name, len(instances))
 	return instances, nil
 }
 
 func (m *autoScalingGroups) DeleteAsg(ref AsgRef) error {
+	// Copy instance refs under lock to avoid deadlocks
 	m.cacheMutex.Lock()
-	defer m.cacheMutex.Unlock()
-	// delete all instances for the asg
-	asgInstances, err := m.InstancesForAsg(ref)
-	if err != nil {
-		return err
-	}
+	instanceRefs := append([]InstanceRef(nil), m.asgToInstances[ref]...)
+	asg := m.registeredAsgs[ref]
+	m.cacheMutex.Unlock()
 
-	//delete asg from cache
-	defer func() {
-		delete(m.registeredAsgs, ref)
-		delete(m.asgToInstances, ref)
-		delete(m.asgNodeGroupSpecs, ref)
-	}()
-
-	waitGroup := sync.WaitGroup{}
-	errsCh := make(chan error, len(asgInstances))
-	for _, asgInstance := range asgInstances {
-		waitGroup.Add(1)
-		go func(instanceID string, insRef InstanceRef) {
-			defer waitGroup.Done()
-			// update cache
-			delete(m.instanceToAsg, insRef)
-			//delete instance
-			err := m.dcService.PerformInstanceAction(&instance.InstanceActionInput{
+	// Delete all instances concurrently (no lock held during API calls)
+	var wg sync.WaitGroup
+	errsCh := make(chan error, len(instanceRefs))
+	for _, insRef := range instanceRefs {
+		wg.Add(1)
+		go func(hostname string) {
+			defer wg.Done()
+			inst, err := m.dcService.GetInstanceByHostname(hostname)
+			if err != nil {
+				errsCh <- err
+				return
+			}
+			err = m.dcService.PerformInstanceAction(&instance.InstanceActionInput{
 				Action: instance.InstanceActionDelete,
-				ID:     instanceID,
+				ID:     inst.ID,
 			})
 			if err != nil {
 				errsCh <- err
 			}
-		}(asgInstance.ID, InstanceRef{Hostname: asgInstance.Hostname})
+		}(insRef.Hostname)
 	}
-	waitGroup.Wait()
+	wg.Wait()
 	close(errsCh)
 
-	errs := make([]error, 0, len(asgInstances))
+	var errs []error
 	for err := range errsCh {
 		errs = append(errs, err)
 	}
@@ -694,40 +692,87 @@ func (m *autoScalingGroups) DeleteAsg(ref AsgRef) error {
 		return fmt.Errorf("failed to delete all instances: %w", errors.Join(errs...))
 	}
 
+	// Clean up caches under lock
+	m.cacheMutex.Lock()
+	for _, insRef := range instanceRefs {
+		// remove from instanceToAsg by hostname
+		var keyToDelete *InstanceRef
+		for k := range m.instanceToAsg {
+			if k.Hostname == insRef.Hostname {
+				kk := k
+				keyToDelete = &kk
+				break
+			}
+		}
+		if keyToDelete != nil {
+			delete(m.instanceToAsg, *keyToDelete)
+		}
+	}
+	delete(m.registeredAsgs, ref)
+	delete(m.asgToInstances, ref)
+	delete(m.asgNodeGroupSpecs, ref)
+	if asg != nil {
+		asg.curSize = 0
+	}
+	m.cacheMutex.Unlock()
 	return nil
 }
 
 func (m *autoScalingGroups) DeleteInstance(ref InstanceRef) error {
+	// Find ASG mapping under lock (try exact and then by hostname)
 	m.cacheMutex.Lock()
-	defer m.cacheMutex.Unlock()
-
 	asg, found := m.instanceToAsg[ref]
+	if !found {
+		for k, v := range m.instanceToAsg {
+			if k.Hostname == ref.Hostname {
+				ref = k
+				asg = v
+				found = true
+				break
+			}
+		}
+	}
+	m.cacheMutex.Unlock()
 	if !found {
 		return fmt.Errorf("instance %s not found in any ASG", ref.Hostname)
 	}
 
-	// Get actual instance details to get the correct ID
+	// Get actual instance details to get the correct ID (no lock held)
 	inst, err := m.dcService.GetInstanceByHostname(ref.Hostname)
 	if err != nil {
 		return fmt.Errorf("failed to get instance details for %s: %v", ref.Hostname, err)
 	}
 
 	// Delete instance via API using correct instance ID
-	err = m.dcService.PerformInstanceAction(&instance.InstanceActionInput{
-		Action: instance.InstanceActionDelete,
-		ID:     inst.ID,
-	})
-	if err != nil {
+	if err := m.dcService.PerformInstanceAction(&instance.InstanceActionInput{Action: instance.InstanceActionDelete, ID: inst.ID}); err != nil {
 		return fmt.Errorf("failed to delete instance %s: %v", inst.ID, err)
 	}
 
-	// Update cache only after successful deletion
-	m.deleteInstanceRef(ref)
-
-	// Update ASG curSize
+	// Update cache and ASG size under lock
+	m.cacheMutex.Lock()
+	// Remove from instanceToAsg
+	var keyToDelete *InstanceRef
+	for k := range m.instanceToAsg {
+		if k.Hostname == ref.Hostname {
+			kk := k
+			keyToDelete = &kk
+			break
+		}
+	}
+	if keyToDelete != nil {
+		delete(m.instanceToAsg, *keyToDelete)
+	}
+	// Remove from asgToInstances
+	refs := m.asgToInstances[asg.AsgRef]
+	for i, r := range refs {
+		if r.Hostname == ref.Hostname {
+			m.asgToInstances[asg.AsgRef] = append(refs[:i], refs[i+1:]...)
+			break
+		}
+	}
 	asg.curSize--
-	klog.Infof("[DEBUG] Deleted instance %s from ASG %s, curSize now %d",
-		ref.Hostname, asg.Name, asg.curSize)
+	m.cacheMutex.Unlock()
 
+	klog.V(4).Infof("Deleted instance %s from ASG %s, curSize now %d", ref.Hostname, asg.Name, asg.curSize)
 	return nil
 }

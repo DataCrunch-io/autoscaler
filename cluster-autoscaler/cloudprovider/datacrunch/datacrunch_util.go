@@ -24,7 +24,6 @@ import (
 	"strconv"
 	"strings"
 
-	v1 "k8s.io/api/core/v1"
 	"k8s.io/klog/v2"
 )
 
@@ -203,10 +202,6 @@ func formatValueWithStyle(value string, style quoteStyle) string {
 }
 
 // check if the node labels has given label and value
-func nodeHasLabel(node *v1.Node, label string, value string) bool {
-	_, hasGpuLabel := node.Labels[label]
-	return hasGpuLabel
-}
 
 func convertConfigLabelsToK8sLabels(labels []string, asg *Asg) string {
 	if asg == nil {
@@ -225,10 +220,10 @@ func convertConfigLabelsToK8sLabels(labels []string, asg *Asg) string {
 
 // parse format: min:max:instance-type:asg-name
 func parseAsgSpec(spec string) (*DatacrunchAsgSpec, error) {
-	klog.Infof("[DEBUG] Parsing ASG spec: %s", spec)
+	klog.V(5).Infof("Parsing ASG spec: %s", spec)
 	parts := strings.Split(spec, ":")
 	if len(parts) != 4 {
-		klog.Errorf("[DEBUG] Invalid ASG spec format: expected 4 parts, got %d - %v", len(parts), parts)
+		klog.Errorf("Invalid ASG spec format: expected 4 parts, got %d - %v", len(parts), parts)
 		return nil, fmt.Errorf("invalid ASG spec: %s", spec)
 	}
 
@@ -250,7 +245,7 @@ func parseAsgSpec(spec string) (*DatacrunchAsgSpec, error) {
 		return nil, fmt.Errorf("invalid ASG name: %s", asgName)
 	}
 
-	klog.Infof("[DEBUG] Parsed ASG spec successfully: min=%d, max=%d, instanceType=%s, name=%s",
+	klog.V(5).Infof("Parsed ASG spec successfully: min=%d, max=%d, instanceType=%s, name=%s",
 		minSize, maxSize, instanceType, asgName)
 	return &DatacrunchAsgSpec{
 		minSize:      minSize,
@@ -281,7 +276,6 @@ func instanceRefFromProviderId(providerId string) (*InstanceRef, error) {
 // extractAsgNameFromHostname extracts the ASG name from a hostname using the magic separator
 // Hostname format: {asg-name}-{magic-number}-{location}-{timestamp}
 // Example: as-test-1b20030v-77-FIN-03-1756144020 → "as-test-1b20030v"
-// Also handles legacy format: {asg-name}-{location}-{timestamp} (for backward compatibility)
 func extractAsgNameFromHostname(hostname string) (string, error) {
 	// Try new format first with magic separator
 	separator := fmt.Sprintf("-%s-", ASG_SEPARATOR_MAGIC_NUMBER)
@@ -296,7 +290,6 @@ func extractAsgNameFromHostname(hostname string) (string, error) {
 	}
 
 	// For now, return error to force fallback to description-based lookup
-	// TODO: Implement smarter legacy parsing if needed
 	return "", fmt.Errorf("hostname does not contain magic separator '%s' and legacy parsing not implemented: %s", separator, hostname)
 }
 
