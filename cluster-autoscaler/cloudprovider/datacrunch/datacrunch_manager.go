@@ -17,6 +17,7 @@ limitations under the License.
 package datacrunch
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,9 +29,7 @@ import (
 	"k8s.io/apimachinery/pkg/api/resource"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/instance"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/instancetypes"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/startscripts"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch"
 	klog "k8s.io/klog/v2"
 )
 
@@ -83,13 +82,10 @@ func createDatacrunchManager(cloudReader io.Reader, discoveryOpts cloudprovider.
 		return nil, err
 	}
 
-	// create the datacrunch wrapper
+	// create the datacrunch wrapper using the official SDK client
 	dcService := &datacrunchWrapper{
-		instance.New(sdkProvider.session),
-		instancetypes.New(sdkProvider.session),
-		startscripts.New(sdkProvider.session),
-		newCustomInstanceAvailability(sdkProvider.session),
-		newCustomInstance(sdkProvider.session),
+		client: sdkProvider.client,
+		ctx:    context.Background(),
 	}
 
 	manager := &DatacrunchManager{
@@ -135,25 +131,23 @@ func (m *DatacrunchManager) updateAsgInstanceCache(asg *Asg) error {
 }
 
 // allInstances returns all instances that belong to a given logical ASG (matched by Description)
-func (m *DatacrunchManager) allASGRunningInstances(asgName string) ([]instance.ListInstancesResponse, error) {
+func (m *DatacrunchManager) allASGRunningInstances(asgName string) ([]datacrunch.Instance, error) {
 	if asgName == "" {
 		return nil, errors.New("asgName is required")
 	}
-	if m.dcService == nil || m.dcService.instanceI == nil {
+	if m.dcService == nil {
 		return nil, nil
 	}
-	instances, err := m.dcService.ListInstances(&instance.ListInstancesInput{
-		Status: string(instance.InstanceStatusRunning),
-	})
+	instances, err := m.dcService.ListInstances(datacrunch.StatusRunning)
 
 	if err != nil {
 		return nil, err
 	}
 
-	filtered := make([]instance.ListInstancesResponse, 0, len(instances))
+	filtered := make([]datacrunch.Instance, 0, len(instances))
 	for _, inst := range instances {
 		if inst.Description == asgName {
-			filtered = append(filtered, *inst)
+			filtered = append(filtered, inst)
 		}
 	}
 	return filtered, nil
@@ -236,10 +230,10 @@ func (m *DatacrunchManager) DeleteAsg(asg *Asg) error {
 func verifyCloudConfigAndPatch(cfg *cloudConfig) *cloudConfig {
 
 	if cfg.BillingConfig.Contract == "" {
-		cfg.BillingConfig.Contract = string(instance.BillingContractPayAsYouGo)
+		cfg.BillingConfig.Contract = "pay_as_you_go"
 	}
 	if cfg.BillingConfig.Price == "" {
-		cfg.BillingConfig.Price = string(instance.BillingPriceDynamic)
+		cfg.BillingConfig.Price = "dynamic"
 	}
 	return cfg
 }
@@ -247,10 +241,7 @@ func verifyCloudConfigAndPatch(cfg *cloudConfig) *cloudConfig {
 // cleanupCreatedInstances attempts to clean up instances that were created but need to be removed due to errors
 func (m *DatacrunchManager) cleanupCreatedInstances(instanceIDs []string) {
 	for _, instanceID := range instanceIDs {
-		err := m.dcService.PerformInstanceAction(&instance.InstanceActionInput{
-			Action: instance.InstanceActionDelete,
-			ID:     instanceID,
-		})
+		err := m.dcService.PerformInstanceAction(instanceID, datacrunch.ActionDelete)
 		if err != nil {
 			klog.Errorf("Failed to cleanup instance %s: %v", instanceID, err)
 		} else {
@@ -265,12 +256,7 @@ func (m *DatacrunchManager) GetAvailableMachineTypes() ([]string, error) {
 		return nil, err
 	}
 
-	// Preallocate capacity and append to avoid leading empty entries
-	types := make([]string, 0, len(instanceTypes))
-	for _, it := range instanceTypes {
-		types = append(types, it.InstanceType)
-	}
-	return types, nil
+	return instanceTypes, nil
 }
 
 func (m *DatacrunchManager) GetAvailableGPUTypes() map[string]struct{} {
@@ -280,12 +266,12 @@ func (m *DatacrunchManager) GetAvailableGPUTypes() map[string]struct{} {
 	}
 
 	types := make(map[string]struct{}, len(instanceTypes))
-	for _, it := range instanceTypes {
-		// if it.InstanceType start with "CPU."
-		if strings.HasPrefix(strings.ToUpper(it.InstanceType), "CPU.") {
+	for _, instanceType := range instanceTypes {
+		// if instanceType starts with "CPU."
+		if strings.HasPrefix(strings.ToUpper(instanceType), "CPU.") {
 			continue
 		}
-		types[it.InstanceType] = struct{}{}
+		types[instanceType] = struct{}{}
 	}
 
 	return types
@@ -299,29 +285,29 @@ func (m *DatacrunchManager) getInstancesForAsg(ref AsgRef) ([]cloudprovider.Inst
 	cloudInstances := make([]cloudprovider.Instance, 0, len(asgInstances))
 	for _, asgIns := range asgInstances {
 		switch asgIns.Status {
-		case string(instance.InstanceStatusRunning):
+		case datacrunch.StatusRunning:
 			cloudInstances = append(cloudInstances, cloudprovider.Instance{
 				Id: asgIns.ID,
 				Status: &cloudprovider.InstanceStatus{
 					State: cloudprovider.InstanceRunning,
 				},
 			})
-		case string(instance.InstanceStatusNew):
-		case string(instance.InstanceStatusOrdered):
-		case string(instance.InstanceStatusProvisioning):
+		case "NEW":
+		case "ORDERED":
+		case "PROVISIONING":
 			cloudInstances = append(cloudInstances, cloudprovider.Instance{
 				Id: asgIns.ID,
 				Status: &cloudprovider.InstanceStatus{
 					State: cloudprovider.InstanceCreating,
 				},
 			})
-		case string(instance.InstanceStatusOffline):
-		case string(instance.InstanceStatusDiscontinued):
-		case string(instance.InstanceStatusNotFound):
-		case string(instance.InstanceStatusUnknown):
-		case string(instance.InstanceStatusDeleting):
+		case datacrunch.StatusOffline:
+		case "DISCONTINUED":
+		case "NOT_FOUND":
+		case "UNKNOWN":
+		case "DELETING":
 			cloudInstances = append(cloudInstances, cloudprovider.Instance{Id: asgIns.ID, Status: &cloudprovider.InstanceStatus{State: cloudprovider.InstanceDeleting}})
-		case string(instance.InstanceStatusError):
+		case "ERROR":
 			cloudInstances = append(cloudInstances, cloudprovider.Instance{Id: asgIns.ID,
 				Status: &cloudprovider.InstanceStatus{ErrorInfo: &cloudprovider.InstanceErrorInfo{
 					ErrorClass:   cloudprovider.OtherErrorClass,

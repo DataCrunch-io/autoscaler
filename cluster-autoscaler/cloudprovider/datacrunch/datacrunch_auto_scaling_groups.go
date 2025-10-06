@@ -27,8 +27,7 @@ import (
 	"time"
 
 	apiv1 "k8s.io/api/core/v1"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/instance"
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/service/startscripts"
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch"
 	klog "k8s.io/klog/v2"
 )
 
@@ -328,8 +327,14 @@ func (m *autoScalingGroups) getNodeConfigForAsg(asg *Asg) (*nodeConfig, error) {
 		image = m.cfg.Image.CPU
 	}
 
+	// check spot from config
+	isSpot := false
+	if m.cfg.BillingConfig.Contract == "SPOT" {
+		isSpot = true
+	}
+
 	nodeConfig := &nodeConfig{
-		IsSpot:        m.cfg.BillingConfig.Contract == string(instance.BillingContractSpot), // Default to non-spot
+		IsSpot:        isSpot,
 		Image:         image,
 		StartupScript: m.cfg.StartupScript,
 		SSHKeyIDs:     m.cfg.SSHKeyIDs,
@@ -394,32 +399,31 @@ func (m *autoScalingGroups) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 	}
 
 	// Create the instance input with all required fields
-	input := instance.CreateInstanceInput{
+	input := datacrunch.CreateInstanceRequest{
 		InstanceType:    asg.instanceType,
 		Image:           image,
 		SSHKeyIDs:       nodeConfig.SSHKeyIDs, // Required
-		StartupScriptID: startupScriptID,      // Required - now properly created
+		StartupScriptID: &startupScriptID,     // Required - now properly created
 		Hostname:        hostname,
 		Description:     asg.Name, // Use ASG ID as description for grouping
-		LocationCode:    location,
+		Location:        location,
 		IsSpot:          nodeConfig.IsSpot,
-		Contract:        nodeConfig.Contract, // Required from billing config
-		Pricing:         nodeConfig.Price,    // Required from billing config
 	}
 
 	// Add OS volume - always add since we set default size in validation
-	input.OSVolume = &instance.OSVolume{
+	input.OSVolume = &datacrunch.OSVolumeCreateRequest{
 		Name: fmt.Sprintf("%s-os-volume", hostname),
-		Size: int64(nodeConfig.OSVolumeSize),
+		Size: nodeConfig.OSVolumeSize,
+		Type: "SSD", // Default type
 	}
 
 	// Add additional volumes if specified
 	if len(nodeConfig.Volumes) > 0 {
-		volumes := make([]instance.Volume, len(nodeConfig.Volumes))
+		volumes := make([]datacrunch.VolumeCreateRequest, len(nodeConfig.Volumes))
 		for i, vol := range nodeConfig.Volumes {
-			volumes[i] = instance.Volume{
+			volumes[i] = datacrunch.VolumeCreateRequest{
 				Name: vol.Name,
-				Size: int64(vol.Size),
+				Size: vol.Size,
 				Type: vol.Type,
 			}
 		}
@@ -431,13 +435,13 @@ func (m *autoScalingGroups) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 		klog.V(7).Infof("CreateInstance request body:\n%s", string(requestBody))
 	}
 
-	instanceID, err := m.dcService.CreateInstance(&input)
+	instance, err := m.dcService.CreateInstance(&input)
 	if err != nil {
 		klog.Errorf("DataCrunch API call failed for instance %s: %v", hostname, err)
 		return "", hostname, fmt.Errorf("failed to create instance: %v", err)
 	}
 
-	return instanceID, hostname, nil
+	return instance.ID, hostname, nil
 }
 
 // createOrGetStartupScript creates a startup script or returns existing ID if already created
@@ -463,18 +467,13 @@ func (m *autoScalingGroups) createOrGetStartupScript(asg *Asg, nodeConfig *nodeC
 	// stringify the script
 	_scriptsUtf8 := string(_patchedBase64Script)
 
-	input := &startscripts.CreateStartScriptInput{
-		Name:   scriptName,
-		Script: _scriptsUtf8,
-	}
-
-	scriptID, err := m.dcService.CreateStartScript(input)
+	script, err := m.dcService.CreateStartScript(scriptName, _scriptsUtf8)
 	if err != nil {
 		klog.Errorf("CreateStartScript API call failed: %v", err)
 		return "", fmt.Errorf("failed to create startup script: %v", err)
 	}
 
-	return scriptID, nil
+	return script.ID, nil
 }
 
 func (m *autoScalingGroups) scaleDownAsg(asg *Asg, count int) error {
@@ -520,7 +519,7 @@ func (m *autoScalingGroups) scaleDownAsg(asg *Asg, count int) error {
 		wg.Add(1)
 		go func(instanceID, hostname string) {
 			defer wg.Done()
-			err := m.dcService.PerformInstanceAction(&instance.InstanceActionInput{Action: instance.InstanceActionDelete, ID: instanceID})
+			err := m.dcService.PerformInstanceAction(instanceID, datacrunch.ActionDelete)
 			if err != nil {
 				klog.Errorf("Failed to delete instance %s: %v", instanceID, err)
 				errsCh <- err
@@ -626,7 +625,7 @@ func (m *autoScalingGroups) InstanceRefsForAsg(ref AsgRef) ([]InstanceRef, error
 	return m.asgToInstances[ref], nil
 }
 
-func (m *autoScalingGroups) InstancesForAsg(ref AsgRef) ([]*instance.ListInstancesResponse, error) {
+func (m *autoScalingGroups) InstancesForAsg(ref AsgRef) ([]datacrunch.Instance, error) {
 	// Copy refs under lock, do API calls without holding the lock
 	m.cacheMutex.Lock()
 	refs0, found := m.asgToInstances[ref]
@@ -634,18 +633,17 @@ func (m *autoScalingGroups) InstancesForAsg(ref AsgRef) ([]*instance.ListInstanc
 	m.cacheMutex.Unlock()
 	if !found {
 		klog.V(5).Infof("No instances found in cache for ASG %s, returning empty list", ref.Name)
-		return []*instance.ListInstancesResponse{}, nil
+		return []datacrunch.Instance{}, nil
 	}
 
-	instances := make([]*instance.ListInstancesResponse, 0, len(refs))
+	instances := make([]datacrunch.Instance, 0, len(refs))
 	for _, r := range refs {
 		inst, err := m.dcService.GetInstanceByHostname(r.Hostname)
 		if err != nil {
 			klog.Errorf("Failed to get instance %s for ASG %s: %v", r.Hostname, ref.Name, err)
 			continue
 		}
-		instCopy := inst
-		instances = append(instances, &instCopy)
+		instances = append(instances, *inst)
 	}
 
 	klog.V(5).Infof("InstancesForAsg %s: returning %d instances", ref.Name, len(instances))
@@ -671,10 +669,7 @@ func (m *autoScalingGroups) DeleteAsg(ref AsgRef) error {
 				errsCh <- err
 				return
 			}
-			err = m.dcService.PerformInstanceAction(&instance.InstanceActionInput{
-				Action: instance.InstanceActionDelete,
-				ID:     inst.ID,
-			})
+			err = m.dcService.PerformInstanceAction(inst.ID, datacrunch.ActionDelete)
 			if err != nil {
 				errsCh <- err
 			}
@@ -743,7 +738,7 @@ func (m *autoScalingGroups) DeleteInstance(ref InstanceRef) error {
 	}
 
 	// Delete instance via API using correct instance ID
-	if err := m.dcService.PerformInstanceAction(&instance.InstanceActionInput{Action: instance.InstanceActionDelete, ID: inst.ID}); err != nil {
+	if err := m.dcService.PerformInstanceAction(inst.ID, datacrunch.ActionDelete); err != nil {
 		return fmt.Errorf("failed to delete instance %s: %v", inst.ID, err)
 	}
 

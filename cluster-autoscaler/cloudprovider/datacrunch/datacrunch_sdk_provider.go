@@ -17,18 +17,31 @@ limitations under the License.
 package datacrunch
 
 import (
-	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch/session"
+	"os"
+
+	"k8s.io/autoscaler/cluster-autoscaler/cloudprovider/datacrunch/datacrunch-sdk-go/datacrunch"
 )
 
 type datacrunchSDKProvider struct {
-	session *session.Session
+	client *datacrunch.Client
 }
 
 func createDatacrunchSDKProvider(cfg *cloudConfig) (*datacrunchSDKProvider, error) {
-	sess := session.NewFromEnv(session.WithDebug(cfg.Debug))
-	provider := &datacrunchSDKProvider{
-		session: sess,
+	// Get credentials from environment variables
+	clientID := os.Getenv("DATACRUNCH_CLIENT_ID")
+	clientSecret := os.Getenv("DATACRUNCH_CLIENT_SECRET")
+
+	// Create client with options
+	client, err := datacrunch.NewClient(
+		datacrunch.WithClientID(clientID),
+		datacrunch.WithClientSecret(clientSecret),
+		datacrunch.WithDebugLogging(cfg.Debug),
+	)
+	if err != nil {
+		return nil, err
 	}
 
-	return provider, nil
+	return &datacrunchSDKProvider{
+		client: client,
+	}, nil
 }
