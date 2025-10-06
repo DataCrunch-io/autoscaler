@@ -24,6 +24,7 @@ You should also take a look at the notes and "gotchas" for your specific cloud p
 * [CloudStack](./cloudprovider/cloudstack/README.md)
 * [ClusterAPI](./cloudprovider/clusterapi/README.md)
 * [DigitalOcean](./cloudprovider/digitalocean/README.md)
+* [DataCrunch](./cloudprovider/datacrunch/README.md)
 * [Exoscale](./cloudprovider/exoscale/README.md)
 * [Equinix Metal](cloudprovider/equinixmetal/README.md#notes)
 * [External gRPC](./cloudprovider/externalgrpc/README.md)
@@ -209,6 +210,7 @@ Supported cloud providers:
 * Civo https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/civo/README.md
 * CloudStack https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/cloudstack/README.md
 * ClusterAPI https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/clusterapi/README.md
+* DataCrunch https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/datacrunch/README.md
 * DigitalOcean https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/digitalocean/README.md
 * Exoscale https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/exoscale/README.md
 * Equinix Metal https://github.com/kubernetes/autoscaler/blob/master/cluster-autoscaler/cloudprovider/equinixmetal/README.md

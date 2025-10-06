@@ -207,13 +207,12 @@ func (ia *customInstance) GetAllInstancesByDescription(description string) ([]in
 		}
 	}
 
-	klog.V(4).Infof("GetAllInstancesByDescription returning %d filtered instances for description '%s'",
+	klog.V(5).Infof("GetAllInstancesByDescription returning %d filtered instances for description '%s'",
 		len(filteredInstances), description)
 	return filteredInstances, nil
 }
 
 // GetAllInstancesByAsgName gets all instances that belong to an ASG by parsing ASG name from hostname
-// This is a more reliable approach than using the description field which users can modify
 func (ia *customInstance) GetAllInstancesByAsgName(asgName string) ([]instance.ListInstancesResponse, error) {
 	// Get all instances to include those in transitional states
 	instances, err := ia.ListInstances(nil)
@@ -222,7 +221,7 @@ func (ia *customInstance) GetAllInstancesByAsgName(asgName string) ([]instance.L
 		return []instance.ListInstancesResponse{}, err
 	}
 
-	klog.V(4).Infof("GetAllInstancesByAsgName found %d total instances from API", len(instances))
+	klog.V(5).Infof("GetAllInstancesByAsgName found %d total instances from API", len(instances))
 
 	// Log details of all instances for debugging
 	for i, inst := range instances {
@@ -269,7 +268,7 @@ func (ia *customInstance) GetAllInstancesByAsgName(asgName string) ([]instance.L
 		}
 	}
 
-	klog.V(4).Infof("GetAllInstancesByAsgName returning %d filtered instances for ASG '%s'",
+	klog.V(5).Infof("GetAllInstancesByAsgName returning %d filtered instances for ASG '%s'",
 		len(filteredInstances), asgName)
 
 	// Log the final filtered instances

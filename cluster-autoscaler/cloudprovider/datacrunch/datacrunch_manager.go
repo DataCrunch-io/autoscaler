@@ -129,7 +129,7 @@ func (m *DatacrunchManager) updateAsgInstanceCache(asg *Asg) error {
 
 	// check if current count is different from desired count
 
-	klog.V(4).Infof("ASG %s currently has %d running instances", asg.Name, currentCount)
+	klog.V(5).Infof("ASG %s currently has %d running instances", asg.Name, currentCount)
 
 	return nil
 }
@@ -338,7 +338,7 @@ func (m *DatacrunchManager) getInstancesForAsg(ref AsgRef) ([]cloudprovider.Inst
 // buildNodeFromTemplate builds a Kubernetes node from ASG template
 // not used
 func (m *DatacrunchManager) buildNodeFromTemplate(asg *Asg, template *asgTemplate) (*apiv1.Node, error) {
-	klog.V(4).Infof("buildNodeFromTemplate for ASG %s: CPU=%d, Memory=%d, GPU=%d",
+	klog.V(5).Infof("buildNodeFromTemplate for ASG %s: CPU=%d, Memory=%d, GPU=%d",
 		asg.Name, template.InstanceType.CPU, template.InstanceType.Memory, template.InstanceType.GPU)
 
 	node := &apiv1.Node{}
@@ -375,10 +375,10 @@ func (m *DatacrunchManager) buildNodeFromTemplate(asg *Asg, template *asgTemplat
 
 	// Add GPU resources if available
 	if template.InstanceType.GPU > 0 {
-		klog.V(4).Infof("Adding GPU resources: %d nvidia.com/gpu", template.InstanceType.GPU)
+		klog.V(5).Infof("Adding GPU resources: %d nvidia.com/gpu", template.InstanceType.GPU)
 		capacity[apiv1.ResourceName("nvidia.com/gpu")] = *resource.NewQuantity(template.InstanceType.GPU, resource.DecimalSI)
 	} else {
-		klog.V(4).Infof("No GPU resources for instance type %s", asg.instanceType)
+		klog.V(5).Infof("No GPU resources for instance type %s", asg.instanceType)
 	}
 
 	node.Status = apiv1.NodeStatus{
@@ -397,7 +397,7 @@ func (m *DatacrunchManager) buildNodeFromTemplate(asg *Asg, template *asgTemplat
 	// ---- Taints ----
 	node.Spec.Taints = append([]apiv1.Taint(nil), m.cfg.Taints...)
 
-	klog.V(4).Infof("Template node created successfully for ASG %s: %s", asg.Name, nodeName)
+	klog.V(5).Infof("Template node created successfully for ASG %s: %s", asg.Name, nodeName)
 	return node, nil
 }
 
@@ -415,7 +415,7 @@ func (m *DatacrunchManager) getAsgTemplate(asgRef AsgRef) (*asgTemplate, error) 
 		klog.Errorf("Failed to get instance type details for ASG %s, type: %s, %v", asg.Name, asg.instanceType, err)
 		return nil, err
 	}
-	klog.V(4).Infof("Successfully got instance type details for ASG %s", asg.Name)
+	klog.V(5).Infof("Successfully got instance type details for ASG %s", asg.Name)
 
 	return &asgTemplate{
 		InstanceType: instanceDetails,

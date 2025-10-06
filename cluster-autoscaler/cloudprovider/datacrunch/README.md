@@ -37,6 +37,25 @@ The cluster autoscaler for DataCrunch scales worker nodes.
   "taints": []
 }
 ```
+## Configuration reference
+
+The JSON above is the authoritative format. This table summarizes top‑level keys for quick reference:
+
+| Key | Type | Required | Default | Notes |
+|-----|------|----------|---------|-------|
+| image.gpu | string | optional | — | Image for GPU nodes |
+| image.cpu | string | optional | — | Image for CPU nodes |
+| sshKeyIDs | array<string> | required | — | SSH key IDs to inject |
+| billingConfig.price | string | optional | — | One of DYNAMIC_PRICE or FIXED_PRICE |
+| billingConfig.contract | string | optional | — | One of LONG_TERM, PAY_AS_YOU_GO, or SPOT |
+| debug | bool | optional | false | Enables additional provider‑side diagnostics |
+| availableLocations | array<string> | required | — | Location codes eligible for provisioning |
+| startupScript | string (base64) | required | — | Base64‑encoded startup script executed on boot |
+| startupScriptEnv | map<string,string> | optional | — | Extra environment variables for the startup script |
+| additionalVolumes | array<object> | optional | — | Each item: { name, size (GB), type (HDD|NVMe) } |
+| taints | array<object> | optional | — | Standard k8s taint objects applied to nodes |
+
+
 
 `DATACRUNCH_CLUSTER_CONFIG_FILE` Can be used as alternative to `DATACRUNCH_CLUSTER_CONFIG`. This is the path to a file containing the JSON structure described above. The file will be read and the contents will be used as the configuration.
 
@@ -81,7 +100,13 @@ docker build -t datacrunch/cluster-autoscaler:dev .
 docker push datacrunch/cluster-autoscaler:dev
 ```
 
+## Support and caveats
+
+- Hostname format: Instances created by this provider include an internal magic separator in their hostname that encodes the ASG name (format: <asg-name>-<magic>-<location>-<timestamp>). The autoscaler relies on this to identify group membership.
+- No legacy fallback: If instances are created outside this provider with different hostname conventions, they may not be associated with the expected ASG by the autoscaler.
+- ProviderID format: datacrunch://<location>/<hostname>.
+
 ## Debugging
 
-To enable debug logging, set the log level of the autoscaler to at least level 4 via cli flag: `--v=4`  
-The logs will include all requests and responses made towards the DataCrunch API including headers and body.
+To enable debug logging, run the autoscaler with `--v=4` or higher.
+At `--v=7` the autoscaler logs CreateInstance request bodies for troubleshooting; response bodies and headers are not logged.

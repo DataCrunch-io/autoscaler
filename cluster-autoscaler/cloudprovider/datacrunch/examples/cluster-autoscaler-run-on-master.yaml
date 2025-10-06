@@ -127,15 +127,7 @@ data:
         "price": "FIXED_PRICE",
         "contract": "PAY_AS_YOU_GO"
       },
-      "labels": {
-        "gpu": {
-          "node-type": "gpu",
-          "workload": "ml"
-        },
-        "cpu": {
-          "node-type": "cpu"
-        }
-      },
+      "labels": [],
       "startupScript": "IyEvYmluL2Jhc2gKIyBSZXBsYWNlIHdpdGggeW91ciBiYXNlNjQgZW5jb2RlZCBzdGFydHVwIHNjcmlwdA==",
       "startupScriptEnv": {
         "K8S_VERSION": "1.32.7",

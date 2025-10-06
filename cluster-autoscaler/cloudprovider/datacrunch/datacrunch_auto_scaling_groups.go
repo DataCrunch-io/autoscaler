@@ -239,7 +239,7 @@ func (m *autoScalingGroups) parseASGNodeGroupSpecs(specs []string) error {
 }
 
 func (m *autoScalingGroups) scaleUpAsg(asg *Asg, delta int) error {
-	klog.V(4).Infof("increase ASG:%s with %d nodes", asg.Name, delta)
+	klog.V(4).Infof("Increasing ASG %s by %d nodes", asg.Name, delta)
 	if delta <= 0 {
 		return fmt.Errorf("size increase must be positive")
 	}
@@ -426,8 +426,7 @@ func (m *autoScalingGroups) createInstanceForAsg(asg *Asg, nodeConfig *nodeConfi
 		input.Volumes = volumes
 	}
 
-	// TODO: Delete before official release
-	// Debug: Log full request body
+	// High-verbosity request body logging for troubleshooting; gated at V(7)
 	if requestBody, err := json.MarshalIndent(input, "", "  "); err == nil {
 		klog.V(7).Infof("CreateInstance request body:\n%s", string(requestBody))
 	}
